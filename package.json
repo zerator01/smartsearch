@@ -1,6 +1,6 @@
 {
   "name": "@konbakuyomu/smart-search",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "CLI-first multi-source web research using OpenAI-compatible search, Exa, Tavily, and Firecrawl.",
   "license": "MIT",
   "homepage": "https://github.com/konbakuyomu/smartsearch#readme",

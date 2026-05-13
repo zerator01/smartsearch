@@ -1156,3 +1156,42 @@ def test_regression_alias_invokes_pytest(monkeypatch):
 
     assert code == 0
     assert "pytest" in captured["cmd"]
+
+
+def test_regression_uses_mock_smoke_when_packaged_tests_missing(monkeypatch, capsys):
+    class MissingPath:
+        def __init__(self, value):
+            self.value = value
+
+        def __truediv__(self, other):
+            return MissingPath(f"{self.value}/{other}")
+
+        @property
+        def parents(self):
+            return [self, self, self]
+
+        def exists(self):
+            return False
+
+        def read_text(self, encoding="utf-8"):
+            return '{"version": "0.1.test"}'
+
+        def __str__(self):
+            return self.value
+
+    async def fake_smoke(mode="mock"):
+        return {"ok": True, "mode": mode, "failed_cases": [], "cases": []}
+
+    def should_not_call_pytest(cmd, cwd):
+        raise AssertionError("packaged regression fallback should not require pytest")
+
+    monkeypatch.setattr(cli.Path, "resolve", lambda self: MissingPath("pkg/src/smart_search/cli.py"))
+    monkeypatch.setattr(cli.subprocess, "call", should_not_call_pytest)
+    monkeypatch.setattr(cli.service, "smoke", fake_smoke)
+
+    code = cli.main(["regression"])
+
+    captured = capsys.readouterr()
+    assert code == cli.EXIT_OK
+    assert "Packaged install has no test files" in captured.err
+    assert json.loads(captured.out)["mode"] == "mock"

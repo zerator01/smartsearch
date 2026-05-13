@@ -1232,8 +1232,16 @@ def _run_regression() -> int:
         "tests/test_smoke.py",
         "tests/test_regression.py",
     ]
+    if not all((root / pattern).exists() for pattern in patterns):
+        print("Packaged install has no test files; running mock smoke regression instead.", file=sys.stderr)
+        return asyncio.run(_run_regression_smoke_fallback())
     cmd = [sys.executable, "-m", "pytest", *patterns]
     return subprocess.call(cmd, cwd=str(root))
+
+
+async def _run_regression_smoke_fallback() -> int:
+    data = await service.smoke("mock")
+    return _print_result("smoke", data, "json")
 
 
 def build_parser() -> argparse.ArgumentParser:
