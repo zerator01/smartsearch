@@ -141,7 +141,13 @@ jobs:
           npm_tag="${{ steps.release.outputs.tag }}"
           tag_name="v${version}"
           target="$(git rev-parse HEAD)"
-          notes="$(printf 'npm package: `%s@%s`\nnpm dist-tag: `%s`\nworkflow run: %s/%s/actions/runs/%s\n' '${{ steps.package.outputs.name }}' "$version" "$npm_tag" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
+          notes_footer="$(printf '\n\n---\n\nnpm package: `%s@%s`\nnpm dist-tag: `%s`\nworkflow run: %s/%s/actions/runs/%s\n' '${{ steps.package.outputs.name }}' "$version" "$npm_tag" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
+          notes_file=".github/releases/v${version}.md"
+          if [[ -f "$notes_file" ]]; then
+            notes="$(cat "$notes_file")${notes_footer}"
+          else
+            notes="$(printf 'Release notes for `%s@%s`.\n' '${{ steps.package.outputs.name }}' "$version")${notes_footer}"
+          fi
           create_release_args=()
           edit_release_args=()
           if [[ "$version" == *-* ]]; then

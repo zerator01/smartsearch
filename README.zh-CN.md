@@ -420,18 +420,32 @@ npm test
 npm pack --dry-run
 ```
 
+## 最新稳定版说明
+
+### v0.1.13
+
+这个稳定版把 0.1.12 beta 线合并进 npm `latest`。
+
+- OpenAI-compatible streaming：`OPENAI_COMPATIBLE_STREAM=true` 或 `smart-search search --stream` 会给 Chat Completions 兼容中转发送 `stream=true`，并在 `routing_decision.openai_compatible_stream` 里记录实际开关；`--no-stream` 可单次关闭。
+- 实验 AnySearch 验收入口：`anysearch-domains`、`anysearch-search`、`anysearch-extract`、`anysearch-batch` 暴露为可选 `vertical_search`，不改变默认 fallback 链，也不进入 `standard` minimum profile。
+- AnySearch setup/config：支持 `ANYSEARCH_API_URL`、`ANYSEARCH_API_KEY`、`ANYSEARCH_TIMEOUT_SECONDS`，并在 `doctor` / `config list` 中脱敏显示。
+- npm 安装包修复：wrapper 可修复缺失的 `.smart-search-python` runtime；npm 包里没有仓库测试目录时，`smart-search regression` 会退到 mock smoke 健康检查。
+- README 和打包的 `smart-search-cli` skill contract 已同步 streaming、AnySearch 边界、setup 参数、发布通道和 Windows npm/mise 验证说明。
+
 ## 发布通道
 
 稳定版走 Git tag 和 npm `latest`：
 
 ```powershell
-git tag v0.1.12
-git push origin v0.1.12
+git tag v0.1.13
+git push origin v0.1.13
 ```
 
 测试版不移动 `latest`。推送到 `main` 会发布下一个 `<package.json version>-beta.N` 到 npm `next`，并且 `N` 按每个稳定版本重新从 1 开始。例如 `0.1.10-beta.1`、`0.1.10-beta.2` 之后是 `0.1.10-beta.3`。
 
 已发布 npm 版本不可变。旧的 `*-dev.*` 包不能原地改名，只能发布新的 `*-beta.N` 替代。
+
+稳定版 GitHub Release 会读取 `.github/releases/vX.Y.Z.md` 作为正文，并自动追加 npm package、dist-tag、workflow run 等元数据。打稳定 tag 前先写这个文件，避免 Release 页面只显示包名和 workflow 链接。
 
 发布收尾检查：
 

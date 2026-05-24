@@ -75,7 +75,8 @@ def test_publish_workflow_uses_beta_lane_and_prerelease_guardrails():
     assert "tag=\"next\"" in workflow
     assert "tag=\"latest\"" in workflow
     assert "Refusing to publish prerelease version" in workflow
-    assert "notes=\"$(printf" in workflow
+    assert "notes_file=\".github/releases/v${version}.md\"" in workflow
+    assert "notes_footer=\"$(printf" in workflow
     assert "gh release create" in workflow
     assert "--prerelease" in workflow
 
@@ -96,6 +97,7 @@ def test_release_docs_explain_beta_lane_and_npm_immutability():
         "dist-tag `next`",
         "0.1.10-beta.3",
         "chore(release): bump version to X.Y.Z",
+        ".github/releases/vX.Y.Z.md",
         "vX.Y.Z",
         "workflow_dispatch",
         "target_ref",
@@ -117,6 +119,7 @@ def test_release_docs_explain_beta_lane_and_npm_immutability():
         "<package.json version>-beta.N",
         "npm `next`",
         "0.1.10-beta.3",
+        ".github/releases/vX.Y.Z.md",
         "npm 版本不可变",
         "gh release list",
         "npm `E409`",
@@ -130,6 +133,7 @@ def test_release_docs_explain_beta_lane_and_npm_immutability():
         "Release Lanes",
         "<package.json version>-beta.N",
         "chore(release): bump version to X.Y.Z",
+        ".github/releases/vX.Y.Z.md",
         "npm versions are immutable",
         "Release Closeout Lessons",
         "GitHub release creation fails",
@@ -141,3 +145,17 @@ def test_release_docs_explain_beta_lane_and_npm_immutability():
     for marker in contract_markers:
         assert marker in public_contract
         assert marker in packaged_contract
+
+
+def test_current_stable_release_notes_describe_user_visible_changes():
+    notes = (ROOT / ".github" / "releases" / "v0.1.13.md").read_text(encoding="utf-8")
+
+    required_markers = [
+        "OpenAI-compatible streaming",
+        "AnySearch acceptance commands",
+        "ANYSEARCH_API_URL",
+        "npm wrapper resilience",
+        "Validation",
+    ]
+    for marker in required_markers:
+        assert marker in notes
