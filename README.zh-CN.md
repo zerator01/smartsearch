@@ -5,15 +5,10 @@
 `smart-search` 是一个给 AI 助手和命令行用户使用的 CLI-first 网页研究工具。它把普通联网搜索、来源发现、网页正文抓取、站点 map、配置检查和 Deep Research 规划统一成一个可复现的命令层。
 
 <p>
-  <a href="https://linux.do">
-    <img src="https://img.shields.io/badge/LinuxDo-community-1f6feb" alt="LinuxDo">
-  </a>
   <a href="https://www.npmjs.com/package/@konbakuyomu/smart-search">
     <img src="https://img.shields.io/npm/v/@konbakuyomu/smart-search?label=npm%20latest" alt="npm latest">
   </a>
 </p>
-
-感谢真诚、友善、团结、专业的 [LinuxDo](https://linux.do) 社区。本项目的 CLI + Skills 路线和开源推广说明均来自社区交流与启发。
 
 ![Star History Chart](https://api.star-history.com/svg?repos=konbakuyomu/smartsearch&type=Date)
 

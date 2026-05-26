@@ -5,15 +5,10 @@
 CLI-first, skill-driven web research for AI agents and terminal users. `smart-search` gives AI tools one reproducible command layer for live search, source discovery, page fetching, site mapping, provider diagnostics, and offline Deep Research planning.
 
 <p>
-  <a href="https://linux.do">
-    <img src="https://img.shields.io/badge/LinuxDo-community-1f6feb" alt="LinuxDo">
-  </a>
   <a href="https://www.npmjs.com/package/@konbakuyomu/smart-search">
     <img src="https://img.shields.io/npm/v/@konbakuyomu/smart-search?label=npm%20latest" alt="npm latest">
   </a>
 </p>
-
-Thanks to the [LinuxDo](https://linux.do) community for the discussions that shaped the CLI + Skills workflow.
 
 ![Star History Chart](https://api.star-history.com/svg?repos=konbakuyomu/smartsearch&type=Date)
 
