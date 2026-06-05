@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
-- **Last Active**: 2026-05-30
+- **Total Sessions**: 17
+- **Last Active**: 2026-06-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~607 | Active |
+| `journal-1.md` | ~650 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-06-06 | Jina and Zhipu MCP provider beta | `b19d00c` | `codex/update-anysearch-readme-links` |
 | 16 | 2026-05-30 | OpenAI-compatible diagnose command | `a62efcc` | `main` |
 | 15 | 2026-05-26 | Skill sync command and search routing rebalance | `33be99b` | `main` |
 | 14 | 2026-05-15 | Global smart-search skill setup and Tavily doctor timeout | `015439b` | `main` |
