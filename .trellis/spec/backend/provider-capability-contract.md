@@ -99,9 +99,9 @@ Capabilities:
 | Capability | Provider order | Purpose |
 | --- | --- | --- |
 | `main_search` | `xai-responses`, `openai-compatible` | Broad answer generation and synthesis |
-| `web_search` | `zhipu`, `tavily`, `firecrawl` | General web-source reinforcement |
+| `web_search` | `zhipu`, `zhipu-mcp`, `tavily`, `firecrawl` | General web-source reinforcement |
 | `docs_search` | `context7`, `exa` by intent | Documentation, SDK, API, library, and framework lookup |
-| `web_fetch` | `tavily`, `firecrawl` | Known URL content extraction |
+| `web_fetch` | `tavily`, `jina`, `zhipu-mcp-reader`, `firecrawl` | Known URL content extraction |
 | `vertical_search` | `anysearch` | Experimental structured/vertical search evidence |
 | `synthesis` | currently successful `main_search` provider | Final answer synthesis |
 
@@ -156,6 +156,9 @@ Minimum profile:
   `docs_search`, and `web_fetch`.
 - `vertical_search` is optional and experimental. It must not satisfy or alter
   the `standard` minimum profile until a separate routing task accepts it.
+- Jina Reader satisfies `web_fetch` only when `JINA_API_KEY` is configured.
+  Anonymous `r.jina.ai` behavior is allowed only as explicit/experimental
+  degraded fetch behavior and must not make `standard` pass.
 - Missing required capability must fail closed before search execution.
 - `SMART_SEARCH_MINIMUM_PROFILE=off` is only for local experiments and tests.
 
@@ -190,6 +193,26 @@ Provider configuration:
   Search API. Do not describe or implement it as a GLM chat model choice,
   Chat Completions `tools=[web_search]`, Search Agent, or MCP Server unless a
   separate provider design task explicitly adds that route.
+- `ZHIPU_MCP_API_KEY` registers separate Zhipu Coding Plan Remote MCP
+  providers. It is not part of the `/paas/v4/web_search` REST provider.
+- `ZHIPU_MCP_SEARCH_API_URL` defaults to
+  `https://open.bigmodel.cn/api/mcp/web_search_prime/mcp` and calls
+  `webSearchPrime` for `web_search`.
+- `ZHIPU_MCP_READER_API_URL` defaults to
+  `https://open.bigmodel.cn/api/mcp/web_reader/mcp` and calls `webReader` for
+  `web_fetch`.
+- `ZHIPU_MCP_ZREAD_API_URL` defaults to
+  `https://open.bigmodel.cn/api/mcp/zread/mcp` and exposes explicit repo/docs
+  discovery commands for `search_doc`, `get_repo_structure`, and `read_file`.
+- Zhipu Coding Plan MCP must be implemented first as a narrow tested
+  MCP-over-HTTP provider layer. Avoid broad MCP abstractions until the
+  first search, reader, and zread tools are stable.
+- `JINA_API_KEY` registers Jina Reader as `web_fetch`.
+- `JINA_READER_API_URL` defaults to `https://r.jina.ai`.
+- `JINA_RESPOND_WITH` is optional. `JINA_RESPOND_WITH=readerlm-v2` requires
+  `JINA_API_KEY` and must fail before network when the key is absent.
+- Jina Reader is not a general `web_search` provider and must not be shown as
+  one in docs, setup, doctor, or capability status.
 - Legacy main-search keys are unsupported: `SMART_SEARCH_API_URL`,
   `SMART_SEARCH_API_KEY`, `SMART_SEARCH_API_MODE`, `SMART_SEARCH_MODEL`, and
   `SMART_SEARCH_XAI_TOOLS`. `config set` / `config unset` must reject them with
@@ -525,7 +548,12 @@ smart-search doctor --format json
 | Provider returns empty normalized result | Record `status="empty"` and try next same-capability provider when fallback is `auto` |
 | `--fallback off` | Try only the first matching provider in the capability chain |
 | Docs intent is false | Do not invoke Context7 or Exa as generic web-search fallback |
-| Fetch intent or known URL flow | Use `web_fetch` chain only: Tavily then Firecrawl |
+| Fetch intent or known URL flow | Use the shared `web_fetch` chain only: Tavily, Jina with key, Zhipu MCP Reader, then Firecrawl |
+| Jina Reader has no `JINA_API_KEY` | Do not register it as configured `web_fetch`; standard minimum profile remains missing unless another fetch provider is configured |
+| `JINA_RESPOND_WITH=readerlm-v2` without `JINA_API_KEY` | Return config error before network and do not count Jina toward `standard` |
+| Jina returns 401/403, 422, 429, timeout, network error, or challenge page such as `Title: Just a moment...` | Record a failed `web_fetch` provider attempt and continue same-capability fallback |
+| Zhipu Coding Plan MCP returns auth/rate/provider/timeout/network error | Record the error in `provider_attempts` when used through fallback and keep fallback same-capability |
+| Zhipu MCP auth is configured | Send `Authorization: Bearer <key>` and never log the token unmasked |
 | Strict validation has no sources | Return `error_type: "evidence_error"` instead of pretending success |
 | One live enhancement provider fails but same capability has fallback | Live smoke may mark the case `degraded`; critical paths still fail non-zero |
 | Interactive setup has guidance text | Write guidance to stderr and final rendered data to stdout |
@@ -673,7 +701,19 @@ When this contract changes, add or update tests that assert:
   strings, and list/tuple argv values produced by PowerShell wrapper flows;
 - Exa HTTP 400/422 responses surface as `parameter_error`, and docs-search
   fallback records them as provider errors rather than empty results;
-- Tavily fetch failure falls back to Firecrawl;
+- Tavily fetch failure falls back through Jina/Zhipu MCP Reader/Firecrawl as
+  configured;
+- Jina no-key does not satisfy `web_fetch`, Jina key does, and ReaderLM-v2
+  without key reports configuration error;
+- Jina and Remote MCP service wrappers await `_decode_provider_json(...)` and
+  return a decoded dict, never a coroutine object;
+- Jina empty/error/challenge output falls through to the next same-capability
+  fetch provider;
+- `fetch URL` and known-URL `search "https://..."` use the same fetch chain;
+- Zhipu Coding Plan Remote MCP mock calls cover `webSearchPrime`,
+  `webReader`, `search_doc`, `get_repo_structure`, and `read_file`;
+- Zhipu MCP auth header is sent, masked, and provider errors are recorded in
+  `provider_attempts` without cross-capability fallback;
 - strict validation returns insufficient evidence when sources are absent;
 - mock smoke covers minimum gate, fallback, routing, and secret masking.
 - `--format content` prints only `content` for `search`, `fetch`, and
@@ -825,12 +865,39 @@ Guide by capability, then show the final minimum-profile result:
 ```text
 [1/3 Required] main_search: xAI Responses or OpenAI-compatible
 [2/3 Required] docs_search: Context7 for docs/API; Exa for official domains, papers, and low-noise discovery
-[3/3 Required] web_fetch: Tavily or Firecrawl
+[3/3 Required] web_fetch: Tavily, Jina with key, Zhipu MCP Reader, or Firecrawl
 [Optional] web_search reinforcement: Zhipu / Tavily / Firecrawl
 ```
 
 This makes setup self-validating without relying on one developer's local
 environment.
+
+### Wrong
+
+Returning a provider JSON decoder coroutine from a public service wrapper:
+
+```python
+async def call_jina_reader(url: str) -> dict[str, Any]:
+    raw = await JinaReaderProvider(...).fetch_url(url)
+    return _decode_provider_json(raw, provider="jina")
+```
+
+This can pass type review while failing at runtime because CLI callers receive
+a coroutine instead of the normalized result dict.
+
+### Correct
+
+Await every async normalization boundary before returning from service wrappers:
+
+```python
+async def call_jina_reader(url: str) -> dict[str, Any]:
+    raw = await JinaReaderProvider(...).fetch_url(url)
+    return await _decode_provider_json(raw, provider="jina")
+```
+
+Add wrapper-level tests for each provider family (`Jina`, `AnySearch`, and
+`Zhipu MCP`) so future async helper changes cannot silently break the public
+CLI/service contract.
 
 ### Wrong
 

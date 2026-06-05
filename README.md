@@ -116,8 +116,8 @@ provider keys or create Trellis/hooks/agents/commands.
 | --- | --- | --- | --- |
 | `main_search` | `search` | xAI Responses, OpenAI-compatible Chat Completions | Broad answer generation and synthesis |
 | `docs_search` | `context7-library`, `context7-docs`, `exa-search` | Context7, Exa | Official docs, SDKs, APIs, framework/library evidence |
-| `web_search` | `zhipu-search`, intent-routed reinforcement inside `search` | Zhipu, Tavily, Firecrawl | Chinese, domestic, current, domain-filtered, or supplementary web discovery |
-| `web_fetch` | `fetch` | Tavily, Firecrawl | Exact URL content extraction for evidence |
+| `web_search` | `zhipu-search`, `zhipu-mcp-search`, intent-routed reinforcement inside `search` | Zhipu Web Search API, Zhipu Coding Plan MCP, Tavily, Firecrawl | Chinese, domestic, current, domain-filtered, or supplementary web discovery |
+| `web_fetch` | `fetch`, `zhipu-mcp-reader` | Tavily, Jina Reader, Zhipu Coding Plan MCP Reader, Firecrawl | Exact URL content extraction for evidence |
 | `vertical_search` | `anysearch-domains`, `anysearch-search`, `anysearch-extract`, `anysearch-batch` | AnySearch (experimental) | Acceptance testing for structured vertical domains such as CVE, finance, legal, academic, and code/docs |
 | `site_map` | `map` | Tavily | Site/documentation structure discovery |
 | `deep_planner` | `deep` / `dr` | Local planner only | Offline plan generation; no provider call by default |
@@ -128,16 +128,18 @@ Fallback is same-capability only:
 | --- | --- |
 | `main_search` | xAI Responses -> OpenAI-compatible |
 | `docs_search` | Context7 for library/API/docs intent; Exa for official domains, papers, product pages, and trusted-site discovery |
-| `web_search` | Zhipu -> Tavily -> Firecrawl |
-| `web_fetch` | Tavily -> Firecrawl |
+| `web_search` | Zhipu Web Search API -> Zhipu Coding Plan MCP `webSearchPrime` -> Tavily -> Firecrawl |
+| `web_fetch` | Tavily -> Jina Reader with `JINA_API_KEY` -> Zhipu Coding Plan MCP `webReader` -> Firecrawl |
 
 AnySearch is intentionally not part of the `web_search` fallback chain and is not required by the `standard` minimum profile. Use its explicit commands for acceptance and boundary testing before promoting any vertical domain into a future route.
+
+Jina Reader is a `web_fetch` provider only. `JINA_API_KEY` is required before Jina satisfies `SMART_SEARCH_MINIMUM_PROFILE=standard`; anonymous `r.jina.ai` behavior is treated as explicit/experimental fetch behavior and must not weaken fail-closed setup checks.
 
 The CLI exposes observability fields such as `routing_decision`, `provider_attempts`, `providers_used`, `fallback_used`, `primary_sources`, `extra_sources`, and `source_warning`.
 
 `extra_sources` are discovery candidates. For high-risk claims, news, policy, finance, health, selection decisions, and serious reviews, fetch key pages first and cite fetched text rather than treating a broad search answer as proof.
 
-Routing rule of thumb: start with `search` for broad discovery and synthesis; use Zhipu for Chinese, domestic, policy, announcements, and current-news searches; use Context7 first for library/API/framework docs; use Exa for official domains, papers, product pages, trusted sites, and low-noise discovery; use Tavily/Firecrawl through `search --extra-sources` for horizontal candidates and through `fetch` for page evidence; use AnySearch only when you explicitly need experimental vertical-domain search.
+Routing rule of thumb: start with `search` for broad discovery and synthesis; use Zhipu Web Search API for Chinese, domestic, policy, announcements, and current-news searches; use Zhipu Coding Plan MCP only when you explicitly want the Coding Plan quota route; use Context7 first for library/API/framework docs; use Exa for official domains, papers, product pages, trusted sites, and low-noise discovery; use Tavily/Firecrawl through `search --extra-sources` for horizontal candidates and through `fetch` for page evidence; use Jina for known-URL extraction; use AnySearch only when you explicitly need experimental vertical-domain search.
 
 ## Deep Research
 
@@ -195,7 +197,9 @@ Use `smart-search setup` for normal configuration. Environment variables remain 
 | Exa | Low-noise official docs, API, paper, product, trusted-page discovery | `EXA_API_KEY` | [Exa docs](https://docs.exa.ai/) | [Exa API keys](https://dashboard.exa.ai/api-keys) |
 | Context7 | SDK, library, framework, and API documentation fallback | `CONTEXT7_API_KEY`, `CONTEXT7_BASE_URL` | [Context7 docs](https://context7.com/docs) | [Context7](https://context7.com/) |
 | Zhipu Web Search API | Chinese, domestic, current, or domain-filtered web discovery | `ZHIPU_API_KEY`, `ZHIPU_API_URL`, `ZHIPU_SEARCH_ENGINE` | [Zhipu web search docs](https://docs.bigmodel.cn/cn/guide/tools/web-search) | [Zhipu API keys](https://open.bigmodel.cn/usercenter/apikeys) |
+| Zhipu Coding Plan Remote MCP | Coding Plan quota web search, page reading, and open-source repo discovery | `ZHIPU_MCP_API_KEY`, `ZHIPU_MCP_SEARCH_API_URL`, `ZHIPU_MCP_READER_API_URL`, `ZHIPU_MCP_ZREAD_API_URL` | [search MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server), [reader MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/reader-mcp-server), [zread MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/zread-mcp-server) | [Zhipu API keys](https://open.bigmodel.cn/usercenter/apikeys) |
 | Tavily | Extra web sources, URL fetch, and site map | `TAVILY_API_URL`, `TAVILY_API_KEY` | [Tavily docs](https://docs.tavily.com/) | [Tavily app](https://app.tavily.com/home) |
+| Jina Reader | Known URL page extraction for `web_fetch`; key required for standard minimum profile | `JINA_API_KEY`, `JINA_READER_API_URL`, `JINA_RESPOND_WITH`, `JINA_TIMEOUT_SECONDS` | [Jina Reader](https://jina.ai/reader/) | [Jina AI](https://jina.ai/) |
 | Firecrawl | Fetch fallback and supplementary web sources | `FIRECRAWL_API_URL`, `FIRECRAWL_API_KEY` | [Firecrawl docs](https://docs.firecrawl.dev/) | [Firecrawl API keys](https://www.firecrawl.dev/app/api-keys) |
 | AnySearch | Experimental vertical search acceptance surface; not a default fallback | `ANYSEARCH_API_URL`, `ANYSEARCH_API_KEY`, `ANYSEARCH_TIMEOUT_SECONDS` | [AnySearch docs](https://www.anysearch.com/docs) | [AnySearch API keys](https://www.anysearch.com/console/api-keys) |
 
@@ -205,7 +209,9 @@ Important boundaries:
 - `OPENAI_COMPATIBLE_STREAM=true` or `smart-search search --stream` sets `stream=true` only for OpenAI-compatible `search` and provider-side `fetch` calls. It is a relay compatibility switch for long requests and does not change xAI Responses behavior, URL description, or source ranking.
 - Legacy `SMART_SEARCH_API_URL`, `SMART_SEARCH_API_KEY`, `SMART_SEARCH_API_MODE`, `SMART_SEARCH_MODEL`, and `SMART_SEARCH_XAI_TOOLS` are not supported config keys. Use `XAI_*` or `OPENAI_COMPATIBLE_*` explicitly.
 - Do not force xAI `web_search` / `x_search` tools or legacy `search_parameters` into the OpenAI-compatible Chat Completions route.
-- Zhipu support is the Web Search API route, not Zhipu Chat Completions `tools=[web_search]`, not Search Agent, and not the MCP Server.
+- `zhipu-search` support is the Web Search API route, not Zhipu Chat Completions `tools=[web_search]`, not Search Agent, and not the MCP Server.
+- Zhipu Coding Plan support is a separate Remote MCP route. `webSearchPrime` maps to `web_search`, `webReader` maps to `web_fetch`, and zread tools map to explicit repo/docs discovery commands. It is not mixed into the existing `/paas/v4/web_search` Zhipu REST provider.
+- Jina Reader is not a general search provider. `JINA_API_KEY` is required for Jina to count toward `standard`; `JINA_RESPOND_WITH=readerlm-v2` also requires `JINA_API_KEY`.
 - `ZHIPU_SEARCH_ENGINE` defaults to `search_std`. Supported official values include `search_std`, `search_pro`, `search_pro_sogou`, and `search_pro_quark`; custom values remain allowed for future services.
 - `TAVILY_API_URL` affects Tavily only. It does not proxy Zhipu. For Tavily Hikari / pooled endpoints, use `https://<host>/api/tavily`; setup normalizes root-host or `/mcp` inputs to that REST base.
 - `FIRECRAWL_API_URL` defaults to `https://api.firecrawl.dev/v2`.
@@ -229,6 +235,8 @@ smart-search setup --non-interactive `
   --zhipu-key "your-zhipu-key" `
   --zhipu-api-url "https://open.bigmodel.cn/api" `
   --zhipu-search-engine "search_pro_sogou" `
+  --zhipu-mcp-key "your-zhipu-coding-plan-key" `
+  --jina-key "your-jina-key" `
   --tavily-api-url "https://api.tavily.com" `
   --tavily-key "your-tavily-key" `
   --firecrawl-api-url "https://api.firecrawl.dev/v2" `
@@ -239,7 +247,7 @@ Minimum profile defaults to `standard`, requiring at least:
 
 - one `main_search` provider: xAI Responses or OpenAI-compatible;
 - one `docs_search` provider: Exa or Context7;
-- one `web_fetch` provider: Tavily or Firecrawl.
+- one `web_fetch` provider: Tavily, Jina with `JINA_API_KEY`, Zhipu Coding Plan MCP Reader, or Firecrawl.
 
 Missing required capabilities fail closed with a configuration error. Use `SMART_SEARCH_MINIMUM_PROFILE=off` only for local experiments.
 
@@ -279,6 +287,11 @@ Provider timeouts:
 | `exa-search` | `exa`, `x` | Exa source discovery |
 | `exa-similar` | `xs` | Similar pages from one URL |
 | `zhipu-search` | `z`, `zp` | Zhipu Web Search API |
+| `zhipu-mcp-search` | `zmcp-search` | Zhipu Coding Plan MCP `webSearchPrime` |
+| `zhipu-mcp-reader` | `zmcp-reader` | Zhipu Coding Plan MCP `webReader` |
+| `zhipu-mcp-search-doc` | `zmcp-doc` | Search open-source repository docs through zread MCP |
+| `zhipu-mcp-repo-structure` | `zmcp-tree` | Read repository structure through zread MCP |
+| `zhipu-mcp-read-file` | `zmcp-file` | Read one repository file through zread MCP |
 | `anysearch-domains` | `as-domains` | Experimental AnySearch domain discovery |
 | `anysearch-search` | `as-search`, `as` | Experimental AnySearch vertical/general search |
 | `anysearch-extract` | `as-extract` | Experimental AnySearch URL extraction |
@@ -304,6 +317,9 @@ smart-search exa-search "OpenAI Responses API documentation" --include-domains p
 smart-search context7-library "react" "hooks" --format json
 smart-search context7-docs "/facebook/react" "useEffect cleanup" --format json
 smart-search zhipu-search "today China AI news" --search-engine search_pro_sogou --count 5 --format json
+smart-search zhipu-mcp-search "today China AI news" --count 5 --format json
+smart-search zhipu-mcp-reader "https://example.com/source" --format json
+smart-search zhipu-mcp-search-doc "owner/repo" "install" --format json
 smart-search anysearch-search "CVE-2024-3094" --domain security.cve --max-results 3 --format json
 smart-search anysearch-extract "https://example.com/source" --format json
 smart-search exa-similar "https://example.com/source" --num-results 5 --format json

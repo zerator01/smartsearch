@@ -109,8 +109,8 @@ Trellis、hooks、agents 或 commands。
 | --- | --- | --- | --- |
 | `main_search` | `search` | xAI Responses、OpenAI-compatible Chat Completions | 综合回答、快速搜索、初步总结 |
 | `docs_search` | `context7-library`、`context7-docs`、`exa-search` | Context7、Exa | 官方文档、SDK、API、框架/库文档 |
-| `web_search` | `zhipu-search`、`search` 内部意图补强 | 智谱、Tavily、Firecrawl | 中文、国内、时效、域名过滤、补充来源 |
-| `web_fetch` | `fetch` | Tavily、Firecrawl | 已知 URL 正文抓取、证据提取 |
+| `web_search` | `zhipu-search`、`zhipu-mcp-search`、`search` 内部意图补强 | 智谱 Web Search API、智谱 Coding Plan MCP、Tavily、Firecrawl | 中文、国内、时效、域名过滤、补充来源 |
+| `web_fetch` | `fetch`、`zhipu-mcp-reader` | Tavily、Jina Reader、智谱 Coding Plan MCP Reader、Firecrawl | 已知 URL 正文抓取、证据提取 |
 | `vertical_search` | `anysearch-domains`、`anysearch-search`、`anysearch-extract`、`anysearch-batch` | AnySearch（实验） | 验收 CVE、金融、法律、学术、代码/文档等结构化垂直域 |
 | `site_map` | `map` | Tavily | 文档站、产品站、目录型站点结构 |
 | `deep_planner` | `deep` / `dr` | 本地 planner | 离线生成 Deep Research 计划，不默认联网 |
@@ -121,10 +121,12 @@ Trellis、hooks、agents 或 commands。
 | --- | --- |
 | `main_search` | xAI Responses -> OpenAI-compatible |
 | `docs_search` | Context7 处理库/API/文档意图；Exa 处理官方域名、论文、产品页、可信站点发现 |
-| `web_search` | 智谱 -> Tavily -> Firecrawl |
-| `web_fetch` | Tavily -> Firecrawl |
+| `web_search` | 智谱 Web Search API -> 智谱 Coding Plan MCP `webSearchPrime` -> Tavily -> Firecrawl |
+| `web_fetch` | Tavily -> 带 `JINA_API_KEY` 的 Jina Reader -> 智谱 Coding Plan MCP `webReader` -> Firecrawl |
 
 AnySearch 当前只作为实验 `vertical_search` 暴露，不进入 `web_search` 兜底链，也不是 `standard` 最低配置要求。请先用显式命令做验收和能力边界判断，再决定未来是否把某个垂直域提升成正式路线。
+
+Jina Reader 只属于 `web_fetch`，不是通用搜索 provider。只有配置 `JINA_API_KEY` 后，它才可以满足 `SMART_SEARCH_MINIMUM_PROFILE=standard`；匿名 `r.jina.ai` 只能当显式/实验抓取能力，不能让最低配置检查放松。
 
 这里有一个重要边界：兜底只在同一类能力里发生。不会用 Context7 去查普通新闻，也不会用 Firecrawl 假装做文档语义检索。
 
@@ -142,7 +144,7 @@ AnySearch 当前只作为实验 `vertical_search` 暴露，不进入 `web_search
 
 `extra_sources` 只是候选来源，不等于自动事实校验。新闻、政策、财经、医疗、严肃评测、工具选型等高风险问题，建议先发现来源，再 `fetch` 关键网页正文，最后只基于抓到的正文写结论。
 
-搜索引擎选择速记：先用 `search` 做宽泛探索和综合；中文、国内、政策、公告、当前新闻优先补 `zhipu-search`；库/API/框架文档优先用 Context7；官方域名、论文、产品页、可信站点和低噪声发现再用 Exa；Tavily/Firecrawl 通过 `search --extra-sources` 做横向候选，通过 `fetch` 做正文证据；AnySearch 只在明确要实验性垂直搜索时使用。
+搜索引擎选择速记：先用 `search` 做宽泛探索和综合；中文、国内、政策、公告、当前新闻优先补 `zhipu-search`；只有明确要用 Coding Plan 额度时才走 `zhipu-mcp-*`；库/API/框架文档优先用 Context7；官方域名、论文、产品页、可信站点和低噪声发现再用 Exa；Tavily/Firecrawl 通过 `search --extra-sources` 做横向候选，通过 `fetch` 做正文证据；Jina 用于已知 URL 正文抓取；AnySearch 只在明确要实验性垂直搜索时使用。
 
 ## Deep Research 深度搜索
 
@@ -204,7 +206,9 @@ smart-search deep "https://example.com/source" --format json
 | Exa | 官方文档、API、论文、产品页、可信网页的低噪声发现 | `EXA_API_KEY` | [Exa docs](https://docs.exa.ai/) | [Exa API keys](https://dashboard.exa.ai/api-keys) |
 | Context7 | SDK、库、框架、API 文档兜底 | `CONTEXT7_API_KEY`、`CONTEXT7_BASE_URL` | [Context7 docs](https://context7.com/docs) | [Context7](https://context7.com/) |
 | 智谱 Web Search API | 中文、国内、时效、域名过滤类来源发现 | `ZHIPU_API_KEY`、`ZHIPU_API_URL`、`ZHIPU_SEARCH_ENGINE` | [智谱联网搜索文档](https://docs.bigmodel.cn/cn/guide/tools/web-search) | [智谱 API keys](https://open.bigmodel.cn/usercenter/apikeys) |
+| 智谱 Coding Plan Remote MCP | 使用 Coding Plan 额度做联网搜索、网页读取、开源仓库发现 | `ZHIPU_MCP_API_KEY`、`ZHIPU_MCP_SEARCH_API_URL`、`ZHIPU_MCP_READER_API_URL`、`ZHIPU_MCP_ZREAD_API_URL` | [联网搜索 MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server)、[网页读取 MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/reader-mcp-server)、[zread MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/zread-mcp-server) | [智谱 API keys](https://open.bigmodel.cn/usercenter/apikeys) |
 | Tavily | 额外来源、URL fetch、站点 map | `TAVILY_API_URL`、`TAVILY_API_KEY` | [Tavily docs](https://docs.tavily.com/) | [Tavily app](https://app.tavily.com/home) |
+| Jina Reader | 已知 URL 正文抓取；满足 standard 最低配置必须有 key | `JINA_API_KEY`、`JINA_READER_API_URL`、`JINA_RESPOND_WITH`、`JINA_TIMEOUT_SECONDS` | [Jina Reader](https://jina.ai/reader/) | [Jina AI](https://jina.ai/) |
 | Firecrawl | fetch 兜底、补充网页来源 | `FIRECRAWL_API_URL`、`FIRECRAWL_API_KEY` | [Firecrawl docs](https://docs.firecrawl.dev/) | [Firecrawl API keys](https://www.firecrawl.dev/app/api-keys) |
 | AnySearch | 实验垂直搜索验收入口，不是默认兜底 | `ANYSEARCH_API_URL`、`ANYSEARCH_API_KEY`、`ANYSEARCH_TIMEOUT_SECONDS` | [AnySearch 文档](https://www.anysearch.com/docs) | [AnySearch API keys](https://www.anysearch.com/console/api-keys) |
 
@@ -214,7 +218,9 @@ smart-search deep "https://example.com/source" --format json
 - `OPENAI_COMPATIBLE_STREAM=true` 或 `smart-search search --stream` 只会给 OpenAI-compatible 的 `search` 和 provider 侧 `fetch` 设置 `stream=true`。它是中转长请求兼容开关，不改变 xAI Responses、URL 描述和来源排序行为。
 - 旧的 `SMART_SEARCH_API_URL`、`SMART_SEARCH_API_KEY`、`SMART_SEARCH_API_MODE`、`SMART_SEARCH_MODEL`、`SMART_SEARCH_XAI_TOOLS` 不再是受支持配置项。请显式使用 `XAI_*` 或 `OPENAI_COMPATIBLE_*`。
 - 不要给 OpenAI-compatible Chat Completions 中转强塞 xAI 的 `web_search` / `x_search` 工具或旧 `search_parameters`。
-- 当前项目里的智谱是 Web Search API，不是 Chat Completions `tools=[web_search]`，不是 Search Agent，也不是 MCP Server。
+- `zhipu-search` 对应的是智谱 Web Search API，不是 Chat Completions `tools=[web_search]`，不是 Search Agent，也不是 MCP Server。
+- 智谱 Coding Plan 是单独的 Remote MCP 路线：`webSearchPrime` 对应 `web_search`，`webReader` 对应 `web_fetch`，zread 工具对应显式仓库/文档发现命令。它不会混进现有 `/paas/v4/web_search` 智谱 REST provider。
+- Jina Reader 不是通用搜索 provider。只有配置 `JINA_API_KEY` 后才计入 `standard`；`JINA_RESPOND_WITH=readerlm-v2` 也必须配置 `JINA_API_KEY`。
 - `ZHIPU_SEARCH_ENGINE` 默认是 `search_std`。官方值包括 `search_std`、`search_pro`、`search_pro_sogou`、`search_pro_quark`；`config set` 仍允许自定义值，方便官方以后新增服务。
 - `TAVILY_API_URL` 只影响 Tavily，不会代理智谱。Tavily Hikari / 号池用 `https://<host>/api/tavily`；setup 会把根域名或 `/mcp` 输入规范化成这个 REST base。
 - `FIRECRAWL_API_URL` 默认是 `https://api.firecrawl.dev/v2`。
@@ -238,6 +244,8 @@ smart-search setup --non-interactive `
   --zhipu-key "your-zhipu-key" `
   --zhipu-api-url "https://open.bigmodel.cn/api" `
   --zhipu-search-engine "search_pro_sogou" `
+  --zhipu-mcp-key "your-zhipu-coding-plan-key" `
+  --jina-key "your-jina-key" `
   --tavily-api-url "https://api.tavily.com" `
   --tavily-key "your-tavily-key" `
   --firecrawl-api-url "https://api.firecrawl.dev/v2" `
@@ -248,7 +256,7 @@ smart-search setup --non-interactive `
 
 - `main_search`：xAI Responses 或 OpenAI-compatible 二选一；
 - `docs_search`：Exa 或 Context7 二选一；
-- `web_fetch`：Tavily 或 Firecrawl 二选一。
+- `web_fetch`：Tavily、带 `JINA_API_KEY` 的 Jina、智谱 Coding Plan MCP Reader、Firecrawl 四选一。
 
 缺少任一最低能力时，`doctor` 和 `search` 会 fail closed 并返回缺失 capability。`SMART_SEARCH_MINIMUM_PROFILE=off` 只建议本地实验使用。
 
@@ -291,6 +299,15 @@ smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 | `ZHIPU_API_KEY` | 智谱 Web Search key |
 | `ZHIPU_API_URL` | 智谱 API 地址，默认 `https://open.bigmodel.cn/api` |
 | `ZHIPU_SEARCH_ENGINE` | 智谱搜索服务，例如 `search_pro_sogou` |
+| `ZHIPU_MCP_API_KEY` | 智谱 Coding Plan Remote MCP key |
+| `ZHIPU_MCP_SEARCH_API_URL` | 智谱 Coding Plan 联网搜索 MCP endpoint |
+| `ZHIPU_MCP_READER_API_URL` | 智谱 Coding Plan 网页读取 MCP endpoint |
+| `ZHIPU_MCP_ZREAD_API_URL` | 智谱 Coding Plan zread MCP endpoint |
+| `ZHIPU_MCP_TIMEOUT_SECONDS` | 智谱 Coding Plan MCP 请求超时，默认 `30` |
+| `JINA_API_KEY` | Jina Reader key；满足 standard 必须配置 |
+| `JINA_READER_API_URL` | Jina Reader endpoint，默认 `https://r.jina.ai` |
+| `JINA_RESPOND_WITH` | Jina Reader 响应模式，例如 `readerlm-v2`；需要 `JINA_API_KEY` |
+| `JINA_TIMEOUT_SECONDS` | Jina Reader 请求超时，默认 `30` |
 | `TAVILY_API_URL` | Tavily REST base |
 | `TAVILY_API_KEY` | Tavily key |
 | `TAVILY_TIMEOUT_SECONDS` | Tavily 连通性检查超时，默认 `30`；公益站/号池较慢时可调大 |
@@ -311,6 +328,11 @@ smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 | `exa-search` | `exa`、`x` | Exa 来源发现 |
 | `exa-similar` | `xs` | 从一个 URL 找相似页面 |
 | `zhipu-search` | `z`、`zp` | 智谱 Web Search API |
+| `zhipu-mcp-search` | `zmcp-search` | 智谱 Coding Plan MCP `webSearchPrime` |
+| `zhipu-mcp-reader` | `zmcp-reader` | 智谱 Coding Plan MCP `webReader` |
+| `zhipu-mcp-search-doc` | `zmcp-doc` | 通过 zread MCP 搜开源仓库文档 |
+| `zhipu-mcp-repo-structure` | `zmcp-tree` | 通过 zread MCP 读仓库结构 |
+| `zhipu-mcp-read-file` | `zmcp-file` | 通过 zread MCP 读单个仓库文件 |
 | `anysearch-domains` | `as-domains` | 实验 AnySearch 域名/能力发现 |
 | `anysearch-search` | `as-search`、`as` | 实验 AnySearch 垂直/通用搜索 |
 | `anysearch-extract` | `as-extract` | 实验 AnySearch URL 抽取 |
@@ -335,6 +357,9 @@ smart-search exa-search "OpenAI Responses API documentation" --include-domains p
 smart-search context7-library "react" "hooks" --format json
 smart-search context7-docs "/facebook/react" "useEffect cleanup" --format json
 smart-search zhipu-search "今天国内 AI 新闻" --search-engine search_pro_sogou --count 5 --format json
+smart-search zhipu-mcp-search "今天国内 AI 新闻" --count 5 --format json
+smart-search zhipu-mcp-reader "https://example.com/source" --format json
+smart-search zhipu-mcp-search-doc "owner/repo" "install" --format json
 smart-search anysearch-search "CVE-2024-3094" --domain security.cve --max-results 3 --format json
 smart-search anysearch-extract "https://example.com/source" --format json
 smart-search exa-similar "https://example.com/source" --num-results 5 --format json

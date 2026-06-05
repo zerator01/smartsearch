@@ -34,6 +34,11 @@ COMMAND_ALIASES = {
     "exa-search": ["exa", "x"],
     "exa-similar": ["xs"],
     "zhipu-search": ["z", "zp"],
+    "zhipu-mcp-search": ["zmcp-search"],
+    "zhipu-mcp-reader": ["zmcp-reader"],
+    "zhipu-mcp-search-doc": ["zmcp-doc"],
+    "zhipu-mcp-repo-structure": ["zmcp-tree"],
+    "zhipu-mcp-read-file": ["zmcp-file"],
     "anysearch-domains": ["as-domains"],
     "anysearch-search": ["as-search", "as"],
     "anysearch-extract": ["as-extract"],
@@ -435,8 +440,10 @@ def _format_doctor_markdown(data: dict[str, Any]) -> str:
     provider_tests = [
         ("exa", data.get("exa_connection_test") or {}),
         ("tavily", data.get("tavily_connection_test") or {}),
+        ("jina", data.get("jina_connection_test") or {}),
         ("firecrawl", data.get("firecrawl_connection_test") or {}),
         ("zhipu", data.get("zhipu_connection_test") or {}),
+        ("zhipu-mcp", data.get("zhipu_mcp_connection_test") or {}),
         ("context7", data.get("context7_connection_test") or {}),
     ]
     rows = []
@@ -779,6 +786,11 @@ def _format_markdown(command: str, data: dict[str, Any]) -> str:
         "exa-search": "Exa Search",
         "exa-similar": "Exa Similar Pages",
         "zhipu-search": "Zhipu Search",
+        "zhipu-mcp-search": "Zhipu Coding Plan MCP Search",
+        "zhipu-mcp-reader": "Zhipu Coding Plan MCP Reader",
+        "zhipu-mcp-search-doc": "Zhipu Coding Plan MCP Search Doc",
+        "zhipu-mcp-repo-structure": "Zhipu Coding Plan MCP Repo Structure",
+        "zhipu-mcp-read-file": "Zhipu Coding Plan MCP Read File",
         "anysearch-domains": "AnySearch Domains",
         "anysearch-search": "AnySearch Search",
         "anysearch-extract": "AnySearch Extract",
@@ -902,6 +914,11 @@ def _format_content(command: str, data: dict[str, Any]) -> str:
         "exa-search",
         "exa-similar",
         "zhipu-search",
+        "zhipu-mcp-search",
+        "zhipu-mcp-reader",
+        "zhipu-mcp-search-doc",
+        "zhipu-mcp-repo-structure",
+        "zhipu-mcp-read-file",
         "anysearch-domains",
         "anysearch-search",
         "anysearch-extract",
@@ -1028,8 +1045,11 @@ def _display_provider(provider: str, lang: str) -> str:
         "xai-responses": "xAI Responses",
         "openai-compatible": "OpenAI-compatible",
         "zhipu": _t(lang, "智谱", "Zhipu"),
+        "zhipu-mcp": _t(lang, "智谱 Coding Plan MCP", "Zhipu Coding Plan MCP"),
+        "zhipu-mcp-reader": _t(lang, "智谱 MCP Reader", "Zhipu MCP Reader"),
         "exa": "Exa",
         "context7": "Context7",
+        "jina": "Jina Reader",
         "tavily": "Tavily",
         "firecrawl": "Firecrawl",
         "anysearch": "AnySearch",
@@ -1084,6 +1104,10 @@ def _normalize_zhipu_api_url(url: str) -> str:
     return _normalize_custom_base_url(url)
 
 
+def _normalize_jina_reader_api_url(url: str) -> str:
+    return _normalize_custom_base_url(url)
+
+
 def _is_tavily_hikari_key(api_key: str) -> bool:
     return api_key.strip().lower().startswith("th-")
 
@@ -1112,12 +1136,13 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
                 provider
                 for provider, configured in [
                     ("zhipu", has("ZHIPU_API_KEY")),
+                    ("zhipu-mcp", has("ZHIPU_MCP_API_KEY")),
                     ("tavily", has("TAVILY_API_KEY")),
                     ("firecrawl", has("FIRECRAWL_API_KEY")),
                 ]
                 if configured
             ],
-            "fallback_chain": ["zhipu", "tavily", "firecrawl"],
+            "fallback_chain": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"],
         },
         "docs_search": {
             "configured": [
@@ -1135,11 +1160,13 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
                 provider
                 for provider, configured in [
                     ("tavily", has("TAVILY_API_KEY")),
+                    ("jina", has("JINA_API_KEY")),
+                    ("zhipu-mcp-reader", has("ZHIPU_MCP_API_KEY")),
                     ("firecrawl", has("FIRECRAWL_API_KEY")),
                 ]
                 if configured
             ],
-            "fallback_chain": ["tavily", "firecrawl"],
+            "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
         },
         "vertical_search": {
             "configured": ["anysearch"] if has("ANYSEARCH_API_KEY") else [],
@@ -1664,8 +1691,8 @@ def _prompt_web_fetch(values: dict[str, str], current: dict[str, str], lang: str
     _write_stderr(
         _t(
             lang,
-            "\n[3/3 必选] web_fetch 网页抓取\n用途: 已知 URL 抓正文；高风险事实核验必须用。\n推荐: Tavily 优先；Firecrawl 可作为抓取兜底。\n",
-            "\n[3/3 Required] web_fetch page fetch\nPurpose: extract known URLs; required for high-risk fact checks.\nRecommended: Tavily first; Firecrawl as fetch fallback.\n",
+            "\n[3/3 必选] web_fetch 网页抓取\n用途: 已知 URL 抓正文；高风险事实核验必须用。\n推荐: Tavily 优先；Jina 需要 key 才算标准配置；Firecrawl 可作为抓取兜底。\n",
+            "\n[3/3 Required] web_fetch page fetch\nPurpose: extract known URLs; required for high-risk fact checks.\nRecommended: Tavily first; Jina requires a key to satisfy standard config; Firecrawl as fetch fallback.\n",
         )
     )
     selected = _prompt_provider_multi_select(
@@ -1674,13 +1701,23 @@ def _prompt_web_fetch(values: dict[str, str], current: dict[str, str], lang: str
             "选择 web_fetch provider",
             "Choose web_fetch providers",
         ),
-        ["tavily", "firecrawl"],
+        ["tavily", "jina", "firecrawl"],
         default_selected,
         lang,
     )
     if "tavily" in selected:
         values["TAVILY_API_KEY"] = _prompt_value("TAVILY_API_KEY", "Tavily API key", current.get("TAVILY_API_KEY", ""), lang=lang)
         _prompt_tavily_api_url(values, current, lang)
+    if "jina" in selected:
+        values["JINA_API_KEY"] = _prompt_value("JINA_API_KEY", "Jina API key", current.get("JINA_API_KEY", ""), lang=lang)
+        raw_url = _prompt_value(
+            "JINA_READER_API_URL",
+            "Jina Reader API URL",
+            current.get("JINA_READER_API_URL", "https://r.jina.ai"),
+            optional=True,
+            lang=lang,
+        )
+        values["JINA_READER_API_URL"] = _normalize_jina_reader_api_url(raw_url)
     if "firecrawl" in selected:
         values["FIRECRAWL_API_KEY"] = _prompt_value(
             "FIRECRAWL_API_KEY",
@@ -1834,6 +1871,15 @@ def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str],
         ("ZHIPU_API_KEY", "Zhipu API key", True),
         ("ZHIPU_API_URL", "Zhipu Web Search API URL", True),
         ("ZHIPU_SEARCH_ENGINE", "Zhipu search service (search_std/search_pro/search_pro_sogou/search_pro_quark/custom)", True),
+        ("ZHIPU_MCP_API_KEY", "Zhipu Coding Plan MCP API key", True),
+        ("ZHIPU_MCP_SEARCH_API_URL", "Zhipu Coding Plan search MCP URL", True),
+        ("ZHIPU_MCP_READER_API_URL", "Zhipu Coding Plan reader MCP URL", True),
+        ("ZHIPU_MCP_ZREAD_API_URL", "Zhipu Coding Plan zread MCP URL", True),
+        ("ZHIPU_MCP_TIMEOUT_SECONDS", "Zhipu Coding Plan MCP timeout seconds", True),
+        ("JINA_API_KEY", "Jina API key", True),
+        ("JINA_READER_API_URL", "Jina Reader API URL", True),
+        ("JINA_RESPOND_WITH", "Jina respond-with mode (optional, e.g. readerlm-v2)", True),
+        ("JINA_TIMEOUT_SECONDS", "Jina timeout seconds", True),
         ("TAVILY_API_URL", "Tavily API URL", True),
         ("TAVILY_API_KEY", "Tavily API key", True),
         ("FIRECRAWL_API_URL", "Firecrawl API URL", True),
@@ -1852,6 +1898,10 @@ def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str],
             value = _normalize_firecrawl_api_url(value)
         elif key == "ZHIPU_API_URL":
             value = _normalize_zhipu_api_url(value)
+        elif key == "JINA_READER_API_URL":
+            value = _normalize_jina_reader_api_url(value)
+        elif key in {"ZHIPU_MCP_SEARCH_API_URL", "ZHIPU_MCP_READER_API_URL", "ZHIPU_MCP_ZREAD_API_URL"}:
+            value = _normalize_custom_base_url(value)
         values[key] = value
 
 
@@ -1915,6 +1965,21 @@ async def _run_async(args: argparse.Namespace) -> int:
             content_size=args.content_size,
         )
         return _print_result("zhipu-search", data, args.format, args.output)
+    if args.command == "zhipu-mcp-search":
+        data = await service.zhipu_mcp_search(args.query, count=args.count)
+        return _print_result("zhipu-mcp-search", data, args.format, args.output)
+    if args.command == "zhipu-mcp-reader":
+        data = await service.zhipu_mcp_reader(args.url)
+        return _print_result("zhipu-mcp-reader", data, args.format, args.output)
+    if args.command == "zhipu-mcp-search-doc":
+        data = await service.zhipu_mcp_search_doc(args.repo, args.query, max_results=args.max_results)
+        return _print_result("zhipu-mcp-search-doc", data, args.format, args.output)
+    if args.command == "zhipu-mcp-repo-structure":
+        data = await service.zhipu_mcp_repo_structure(args.repo, ref=args.ref)
+        return _print_result("zhipu-mcp-repo-structure", data, args.format, args.output)
+    if args.command == "zhipu-mcp-read-file":
+        data = await service.zhipu_mcp_read_file(args.repo, args.path, ref=args.ref)
+        return _print_result("zhipu-mcp-read-file", data, args.format, args.output)
     if args.command == "anysearch-domains":
         data = await service.anysearch_domains(args.domain)
         return _print_result("anysearch-domains", data, args.format, args.output)
@@ -2046,6 +2111,15 @@ def _run_setup(args: argparse.Namespace) -> int:
         "ZHIPU_API_KEY": args.zhipu_key,
         "ZHIPU_API_URL": _normalize_zhipu_api_url(args.zhipu_api_url),
         "ZHIPU_SEARCH_ENGINE": args.zhipu_search_engine,
+        "ZHIPU_MCP_API_KEY": args.zhipu_mcp_key,
+        "ZHIPU_MCP_SEARCH_API_URL": _normalize_custom_base_url(args.zhipu_mcp_search_api_url),
+        "ZHIPU_MCP_READER_API_URL": _normalize_custom_base_url(args.zhipu_mcp_reader_api_url),
+        "ZHIPU_MCP_ZREAD_API_URL": _normalize_custom_base_url(args.zhipu_mcp_zread_api_url),
+        "ZHIPU_MCP_TIMEOUT_SECONDS": args.zhipu_mcp_timeout,
+        "JINA_API_KEY": args.jina_key,
+        "JINA_READER_API_URL": _normalize_jina_reader_api_url(args.jina_reader_api_url),
+        "JINA_RESPOND_WITH": args.jina_respond_with,
+        "JINA_TIMEOUT_SECONDS": args.jina_timeout,
         "TAVILY_API_URL": _normalize_tavily_flag_api_url(args.tavily_api_url, args.tavily_key),
         "TAVILY_API_KEY": args.tavily_key,
         "FIRECRAWL_API_URL": _normalize_firecrawl_api_url(args.firecrawl_api_url),
@@ -2122,6 +2196,8 @@ def _run_regression() -> int:
         "tests/test_cli.py",
         "tests/test_service.py",
         "tests/test_providers_new.py",
+        "tests/test_jina_provider.py",
+        "tests/test_zhipu_mcp_provider.py",
         "tests/test_smoke.py",
         "tests/test_regression.py",
         "tests/test_release_workflow.py",
@@ -2212,6 +2288,57 @@ def build_parser() -> argparse.ArgumentParser:
     zhipu_parser.add_argument("--search-domain-filter", default="")
     zhipu_parser.add_argument("--content-size", choices=["medium", "high"], default="medium")
     _add_format_args(zhipu_parser)
+
+    zhipu_mcp_search_parser = sub.add_parser(
+        "zhipu-mcp-search",
+        aliases=COMMAND_ALIASES["zhipu-mcp-search"],
+        help="Run Zhipu Coding Plan Remote MCP webSearchPrime.",
+    )
+    zhipu_mcp_search_parser.set_defaults(command="zhipu-mcp-search")
+    zhipu_mcp_search_parser.add_argument("query")
+    zhipu_mcp_search_parser.add_argument("--count", type=int, default=5)
+    _add_format_args(zhipu_mcp_search_parser)
+
+    zhipu_mcp_reader_parser = sub.add_parser(
+        "zhipu-mcp-reader",
+        aliases=COMMAND_ALIASES["zhipu-mcp-reader"],
+        help="Run Zhipu Coding Plan Remote MCP webReader.",
+    )
+    zhipu_mcp_reader_parser.set_defaults(command="zhipu-mcp-reader")
+    zhipu_mcp_reader_parser.add_argument("url")
+    _add_format_args(zhipu_mcp_reader_parser)
+
+    zhipu_mcp_search_doc_parser = sub.add_parser(
+        "zhipu-mcp-search-doc",
+        aliases=COMMAND_ALIASES["zhipu-mcp-search-doc"],
+        help="Search repository docs through Zhipu Coding Plan zread MCP.",
+    )
+    zhipu_mcp_search_doc_parser.set_defaults(command="zhipu-mcp-search-doc")
+    zhipu_mcp_search_doc_parser.add_argument("repo")
+    zhipu_mcp_search_doc_parser.add_argument("query")
+    zhipu_mcp_search_doc_parser.add_argument("--max-results", type=int, default=5)
+    _add_format_args(zhipu_mcp_search_doc_parser)
+
+    zhipu_mcp_repo_structure_parser = sub.add_parser(
+        "zhipu-mcp-repo-structure",
+        aliases=COMMAND_ALIASES["zhipu-mcp-repo-structure"],
+        help="Read repository structure through Zhipu Coding Plan zread MCP.",
+    )
+    zhipu_mcp_repo_structure_parser.set_defaults(command="zhipu-mcp-repo-structure")
+    zhipu_mcp_repo_structure_parser.add_argument("repo")
+    zhipu_mcp_repo_structure_parser.add_argument("--ref", default="")
+    _add_format_args(zhipu_mcp_repo_structure_parser)
+
+    zhipu_mcp_read_file_parser = sub.add_parser(
+        "zhipu-mcp-read-file",
+        aliases=COMMAND_ALIASES["zhipu-mcp-read-file"],
+        help="Read a repository file through Zhipu Coding Plan zread MCP.",
+    )
+    zhipu_mcp_read_file_parser.set_defaults(command="zhipu-mcp-read-file")
+    zhipu_mcp_read_file_parser.add_argument("repo")
+    zhipu_mcp_read_file_parser.add_argument("path")
+    zhipu_mcp_read_file_parser.add_argument("--ref", default="")
+    _add_format_args(zhipu_mcp_read_file_parser)
 
     anysearch_domains_parser = sub.add_parser(
         "anysearch-domains",
@@ -2398,6 +2525,15 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--zhipu-key", default="", help="Save ZHIPU_API_KEY.")
     setup_parser.add_argument("--zhipu-api-url", default="", help="Save ZHIPU_API_URL.")
     setup_parser.add_argument("--zhipu-search-engine", default="", help="Save ZHIPU_SEARCH_ENGINE.")
+    setup_parser.add_argument("--zhipu-mcp-key", default="", help="Save ZHIPU_MCP_API_KEY.")
+    setup_parser.add_argument("--zhipu-mcp-search-api-url", default="", help="Save ZHIPU_MCP_SEARCH_API_URL.")
+    setup_parser.add_argument("--zhipu-mcp-reader-api-url", default="", help="Save ZHIPU_MCP_READER_API_URL.")
+    setup_parser.add_argument("--zhipu-mcp-zread-api-url", default="", help="Save ZHIPU_MCP_ZREAD_API_URL.")
+    setup_parser.add_argument("--zhipu-mcp-timeout", default="", help="Save ZHIPU_MCP_TIMEOUT_SECONDS.")
+    setup_parser.add_argument("--jina-key", default="", help="Save JINA_API_KEY.")
+    setup_parser.add_argument("--jina-reader-api-url", default="", help="Save JINA_READER_API_URL.")
+    setup_parser.add_argument("--jina-respond-with", default="", help="Save JINA_RESPOND_WITH, e.g. readerlm-v2.")
+    setup_parser.add_argument("--jina-timeout", default="", help="Save JINA_TIMEOUT_SECONDS.")
     setup_parser.add_argument("--tavily-api-url", default="", help="Save TAVILY_API_URL.")
     setup_parser.add_argument("--tavily-key", default="", help="Save TAVILY_API_KEY.")
     setup_parser.add_argument("--firecrawl-api-url", default="", help="Save FIRECRAWL_API_URL.")

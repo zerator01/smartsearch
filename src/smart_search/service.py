@@ -13,9 +13,11 @@ from .logger import log_info
 from .providers.anysearch import AnySearchProvider
 from .providers.context7 import Context7Provider
 from .providers.exa import ExaSearchProvider
+from .providers.jina import JinaReaderProvider
 from .providers.openai_compatible import OpenAICompatibleSearchProvider, get_local_time_info
 from .providers.xai_responses import XAIResponsesSearchProvider
 from .providers.zhipu import ZhipuWebSearchProvider
+from .providers.zhipu_mcp import ZhipuMCPProvider
 from .sources import merge_sources, new_session_id, split_answer_and_sources
 from .utils import search_prompt
 
@@ -81,6 +83,11 @@ DEEP_ALLOWED_TOOLS = {
     "exa-search",
     "exa-similar",
     "zhipu-search",
+    "zhipu-mcp-search",
+    "zhipu-mcp-reader",
+    "zhipu-mcp-search-doc",
+    "zhipu-mcp-repo-structure",
+    "zhipu-mcp-read-file",
     "context7-library",
     "context7-docs",
     "fetch",
@@ -645,12 +652,13 @@ def get_capability_status() -> dict[str, Any]:
                 name
                 for name, enabled in [
                     ("zhipu", bool(config.zhipu_api_key)),
+                    ("zhipu-mcp", bool(config.zhipu_mcp_api_key)),
                     ("tavily", bool(config.tavily_api_key)),
                     ("firecrawl", bool(config.firecrawl_api_key)),
                 ]
                 if enabled
             ],
-            "fallback_chain": ["zhipu", "tavily", "firecrawl"],
+            "fallback_chain": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"],
         },
         "docs_search": {
             "configured": [
@@ -668,11 +676,13 @@ def get_capability_status() -> dict[str, Any]:
                 name
                 for name, enabled in [
                     ("tavily", bool(config.tavily_api_key)),
+                    ("jina", bool(config.jina_api_key)),
+                    ("zhipu-mcp-reader", bool(config.zhipu_mcp_api_key)),
                     ("firecrawl", bool(config.firecrawl_api_key)),
                 ]
                 if enabled
             ],
-            "fallback_chain": ["tavily", "firecrawl"],
+            "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
         },
         "vertical_search": {
             "configured": ["anysearch"] if config.anysearch_api_key else [],
@@ -871,6 +881,10 @@ async def _run_web_fetch_fallback(url: str, fallback: str = "auto") -> tuple[dic
     providers = []
     if config.tavily_api_key:
         providers.append("tavily")
+    if config.jina_api_key:
+        providers.append("jina")
+    if config.zhipu_mcp_api_key:
+        providers.append("zhipu-mcp-reader")
     if config.firecrawl_api_key:
         providers.append("firecrawl")
     if fallback == "off":
@@ -881,6 +895,20 @@ async def _run_web_fetch_fallback(url: str, fallback: str = "auto") -> tuple[dic
         try:
             if provider == "tavily":
                 content = await call_tavily_extract(url)
+            elif provider == "jina":
+                data = await jina_fetch(url)
+                content = data.get("content") if data.get("ok") else None
+                if not data.get("ok"):
+                    status = "error" if data.get("error_type") in {"auth_error", "config_error", "parameter_error", "quality_error", "rate_limited", "timeout", "network_error", "runtime_error"} else "empty"
+                    attempts.append(_attempt("web_fetch", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+                    continue
+            elif provider == "zhipu-mcp-reader":
+                data = await zhipu_mcp_reader(url)
+                content = data.get("content") if data.get("ok") else None
+                if not data.get("ok"):
+                    status = "error" if data.get("error_type") in {"auth_error", "config_error", "provider_error", "rate_limited", "timeout", "network_error", "runtime_error"} else "empty"
+                    attempts.append(_attempt("web_fetch", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+                    continue
             else:
                 content = await call_firecrawl_scrape(url)
             if content and content.strip():
@@ -908,6 +936,8 @@ async def _run_web_search_fallback(
     configured: list[str] = []
     if config.zhipu_api_key:
         configured.append("zhipu")
+    if config.zhipu_mcp_api_key:
+        configured.append("zhipu-mcp")
     if config.tavily_api_key:
         configured.append("tavily")
     if config.firecrawl_api_key:
@@ -928,6 +958,15 @@ async def _run_web_search_fallback(
                         attempts.append(_attempt("web_search", provider, "ok", start, result_count=len(sources)))
                         return sources, attempts
                 status = "error" if data.get("error_type") in {"rate_limited", "auth_error", "timeout", "network_error", "runtime_error"} else "empty"
+                attempts.append(_attempt("web_search", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+            elif provider == "zhipu-mcp":
+                data = await zhipu_mcp_search(query, count=count)
+                if data.get("ok"):
+                    sources = _normalize_source_results(data.get("results"), "zhipu-mcp")
+                    if sources:
+                        attempts.append(_attempt("web_search", provider, "ok", start, result_count=len(sources)))
+                        return sources, attempts
+                status = "error" if data.get("error_type") in {"rate_limited", "auth_error", "timeout", "network_error", "runtime_error", "provider_error"} else "empty"
                 attempts.append(_attempt("web_search", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
             elif provider == "tavily":
                 results = await call_tavily_search(query, count)
@@ -1105,6 +1144,16 @@ async def call_firecrawl_scrape(url: str, ctx=None) -> str | None:
     return None
 
 
+async def call_jina_reader(url: str) -> dict[str, Any]:
+    raw = await JinaReaderProvider(
+        config.jina_reader_api_url,
+        config.jina_api_key,
+        config.jina_respond_with,
+        config.jina_timeout,
+    ).fetch(url)
+    return await _decode_provider_json(raw, provider="jina")
+
+
 async def call_tavily_map(
     url: str,
     instructions: str = "",
@@ -1223,7 +1272,8 @@ async def search(
     docs_intent = _is_docs_intent(query)
     zh_current_intent = _is_zh_current_intent(query)
     web_current_intent = zh_current_intent
-    fetch_intent = _is_fetch_intent(query)
+    fetch_urls = _extract_urls(query)
+    fetch_intent = bool(fetch_urls) or _is_fetch_intent(query)
     supplemental_paths: list[str] = []
     if docs_intent:
         supplemental_paths.append("docs_search")
@@ -1331,7 +1381,8 @@ async def search(
             provider_attempts.extend(web_attempts)
             supplemental_sources.extend(web_sources)
         if fetch_intent:
-            fetch_result, fetch_attempts = await _run_web_fetch_fallback(query.strip(), fallback=fallback_mode)
+            fetch_url = fetch_urls[0] if fetch_urls else query.strip()
+            fetch_result, fetch_attempts = await _run_web_fetch_fallback(fetch_url, fallback=fallback_mode)
             provider_attempts.extend(fetch_attempts)
             if fetch_result:
                 supplemental_sources.append({"url": fetch_result["url"], "provider": fetch_result["provider"], "description": fetch_result["content"][:300]})
@@ -1445,39 +1496,17 @@ def _primary_search_error_result(
 
 async def fetch(url: str) -> dict[str, Any]:
     start = time.time()
-    attempts: list[dict] = []
-    tavily_start = time.time()
-    tavily_result = await call_tavily_extract(url)
-    if tavily_result:
-        attempts.append(_attempt("web_fetch", "tavily", "ok", tavily_start, result_count=1))
+    fetch_result, attempts = await _run_web_fetch_fallback(url)
+    if fetch_result:
         return {
-            "ok": True,
-            "url": url,
-            "provider": "tavily",
-            "content": tavily_result,
+            **fetch_result,
             "provider_attempts": attempts,
-            "fallback_used": False,
+            "fallback_used": _fallback_used(attempts),
             "elapsed_ms": _elapsed_ms(start),
         }
-    attempts.append(_attempt("web_fetch", "tavily", "empty", tavily_start))
 
-    firecrawl_start = time.time()
-    firecrawl_result = await call_firecrawl_scrape(url)
-    if firecrawl_result:
-        attempts.append(_attempt("web_fetch", "firecrawl", "ok", firecrawl_start, result_count=1))
-        return {
-            "ok": True,
-            "url": url,
-            "provider": "firecrawl",
-            "content": firecrawl_result,
-            "provider_attempts": attempts,
-            "fallback_used": True,
-            "elapsed_ms": _elapsed_ms(start),
-        }
-    attempts.append(_attempt("web_fetch", "firecrawl", "empty", firecrawl_start))
-
-    if not config.tavily_api_key and not config.firecrawl_api_key:
-        error = "TAVILY_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
+    if not (config.tavily_api_key or config.jina_api_key or config.zhipu_mcp_api_key or config.firecrawl_api_key):
+        error = "TAVILY_API_KEY、JINA_API_KEY、ZHIPU_MCP_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
         error_type = "config_error"
     else:
         error = "所有提取服务均未能获取内容"
@@ -1557,11 +1586,11 @@ def _anysearch_provider() -> AnySearchProvider:
     return AnySearchProvider(config.anysearch_api_url, config.anysearch_api_key, config.anysearch_timeout)
 
 
-async def _decode_provider_json(raw: str) -> dict[str, Any]:
+async def _decode_provider_json(raw: str, provider: str = "anysearch") -> dict[str, Any]:
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        return {"ok": False, "provider": "anysearch", "error_type": "parse_error", "error": raw}
+        return {"ok": False, "provider": provider, "error_type": "parse_error", "error": raw}
 
 
 async def anysearch_domains(domain: str = "") -> dict[str, Any]:
@@ -1585,6 +1614,57 @@ async def anysearch_extract(url: str, max_length: int = 20000) -> dict[str, Any]
 
 async def anysearch_batch(queries: list[str], max_results: int = 3) -> dict[str, Any]:
     return await _decode_provider_json(await _anysearch_provider().batch_search(queries, max_results=max_results))
+
+
+def _zhipu_mcp_search_provider() -> ZhipuMCPProvider:
+    return ZhipuMCPProvider(
+        config.zhipu_mcp_search_api_url,
+        config.zhipu_mcp_api_key or "",
+        config.zhipu_mcp_timeout,
+        provider_id="zhipu-mcp",
+    )
+
+
+def _zhipu_mcp_reader_provider() -> ZhipuMCPProvider:
+    return ZhipuMCPProvider(
+        config.zhipu_mcp_reader_api_url,
+        config.zhipu_mcp_api_key or "",
+        config.zhipu_mcp_timeout,
+        provider_id="zhipu-mcp-reader",
+    )
+
+
+def _zhipu_mcp_zread_provider() -> ZhipuMCPProvider:
+    return ZhipuMCPProvider(
+        config.zhipu_mcp_zread_api_url,
+        config.zhipu_mcp_api_key or "",
+        config.zhipu_mcp_timeout,
+        provider_id="zhipu-mcp-zread",
+    )
+
+
+async def jina_fetch(url: str) -> dict[str, Any]:
+    return await call_jina_reader(url)
+
+
+async def zhipu_mcp_search(query: str, count: int = 5) -> dict[str, Any]:
+    return await _decode_provider_json(await _zhipu_mcp_search_provider().web_search(query, count=count), provider="zhipu-mcp")
+
+
+async def zhipu_mcp_reader(url: str) -> dict[str, Any]:
+    return await _decode_provider_json(await _zhipu_mcp_reader_provider().web_reader(url), provider="zhipu-mcp-reader")
+
+
+async def zhipu_mcp_search_doc(repo: str, query: str, max_results: int = 5) -> dict[str, Any]:
+    return await _decode_provider_json(await _zhipu_mcp_zread_provider().search_doc(repo, query, max_results=max_results), provider="zhipu-mcp-zread")
+
+
+async def zhipu_mcp_repo_structure(repo: str, ref: str = "") -> dict[str, Any]:
+    return await _decode_provider_json(await _zhipu_mcp_zread_provider().get_repo_structure(repo, ref=ref), provider="zhipu-mcp-zread")
+
+
+async def zhipu_mcp_read_file(repo: str, path: str, ref: str = "") -> dict[str, Any]:
+    return await _decode_provider_json(await _zhipu_mcp_zread_provider().read_file(repo, path, ref=ref), provider="zhipu-mcp-zread")
 
 
 async def exa_find_similar(url: str, num_results: int = 5) -> dict[str, Any]:
@@ -2106,6 +2186,21 @@ async def _test_tavily_connection() -> dict[str, Any]:
         return {"status": "warning", "message": f"HTTP {resp.status_code}: {resp.text[:100]}", "response_time_ms": response_time}
 
 
+async def _test_jina_connection() -> dict[str, Any]:
+    if config.jina_respond_with and not config.jina_api_key:
+        return {"status": "config_error", "message": "JINA_RESPOND_WITH requires JINA_API_KEY"}
+    if not config.jina_api_key:
+        return {"status": "not_configured", "message": "JINA_API_KEY 未设置，Jina 不满足 standard web_fetch；匿名 Reader 只能作为显式实验使用"}
+    start = time.time()
+    data = await jina_fetch("https://example.com")
+    response_time = _elapsed_ms(start)
+    if data.get("ok"):
+        return {"status": "ok", "message": "Jina Reader 可用", "response_time_ms": response_time}
+    error_type = data.get("error_type", "")
+    status = error_type if error_type in {"auth_error", "config_error", "parameter_error", "rate_limited", "timeout"} else "warning"
+    return {"status": status, "message": data.get("error", "Jina Reader 不可用"), "response_time_ms": response_time}
+
+
 async def _test_zhipu_connection() -> dict[str, Any]:
     if not config.zhipu_api_key:
         return {"status": "not_configured", "message": "ZHIPU_API_KEY 未设置，智谱搜索功能不可用"}
@@ -2113,6 +2208,17 @@ async def _test_zhipu_connection() -> dict[str, Any]:
     if result.get("ok"):
         return {"status": "ok", "message": "智谱 Web Search 可用", "response_time_ms": result.get("elapsed_ms", 0)}
     return {"status": "warning", "message": result.get("error", "智谱 Web Search 不可用"), "response_time_ms": result.get("elapsed_ms", 0)}
+
+
+async def _test_zhipu_mcp_connection() -> dict[str, Any]:
+    if not config.zhipu_mcp_api_key:
+        return {"status": "not_configured", "message": "ZHIPU_MCP_API_KEY 未设置，智谱 Coding Plan MCP 功能不可用"}
+    result = await zhipu_mcp_search("test", count=1)
+    if result.get("ok"):
+        return {"status": "ok", "message": "智谱 Coding Plan MCP 可用", "response_time_ms": result.get("elapsed_ms", 0)}
+    error_type = result.get("error_type", "")
+    status = error_type if error_type in {"auth_error", "config_error", "provider_error", "rate_limited", "timeout"} else "warning"
+    return {"status": status, "message": result.get("error", "智谱 Coding Plan MCP 不可用"), "response_time_ms": result.get("elapsed_ms", 0)}
 
 
 async def _test_context7_connection() -> dict[str, Any]:
@@ -2160,6 +2266,13 @@ async def doctor() -> dict[str, Any]:
     except Exception as e:
         info["tavily_connection_test"] = {"status": "error", "message": str(e)}
 
+    try:
+        info["jina_connection_test"] = await _test_jina_connection()
+    except httpx.TimeoutException:
+        info["jina_connection_test"] = {"status": "timeout", "message": "Jina Reader 请求超时"}
+    except Exception as e:
+        info["jina_connection_test"] = {"status": "error", "message": str(e)}
+
     if config.firecrawl_api_key:
         info["firecrawl_connection_test"] = {"status": "configured", "message": "FIRECRAWL_API_KEY 已设置"}
     else:
@@ -2171,6 +2284,13 @@ async def doctor() -> dict[str, Any]:
         info["zhipu_connection_test"] = {"status": "timeout", "message": "智谱 API 请求超时"}
     except Exception as e:
         info["zhipu_connection_test"] = {"status": "error", "message": str(e)}
+
+    try:
+        info["zhipu_mcp_connection_test"] = await _test_zhipu_mcp_connection()
+    except httpx.TimeoutException:
+        info["zhipu_mcp_connection_test"] = {"status": "timeout", "message": "智谱 Coding Plan MCP 请求超时"}
+    except Exception as e:
+        info["zhipu_mcp_connection_test"] = {"status": "error", "message": str(e)}
 
     try:
         info["context7_connection_test"] = await _test_context7_connection()
@@ -2291,9 +2411,9 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
             "fallback_chain": MAIN_SEARCH_FALLBACK_CHAIN,
             "ok": True,
         },
-        "web_search": {"configured": ["zhipu"], "fallback_chain": ["zhipu", "tavily", "firecrawl"], "ok": True},
+        "web_search": {"configured": ["zhipu"], "fallback_chain": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"], "ok": True},
         "docs_search": {"configured": ["context7"], "fallback_chain": ["context7", "exa"], "ok": True},
-        "web_fetch": {"configured": ["tavily"], "fallback_chain": ["tavily", "firecrawl"], "ok": True},
+        "web_fetch": {"configured": ["tavily"], "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"], "ok": True},
         "vertical_search": {"configured": [], "fallback_chain": ["anysearch"], "ok": False, "experimental": True},
     }
     minimum = _minimum_profile_result("standard", minimum_status)
@@ -2486,7 +2606,7 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
         {
             **minimum_status,
             "docs_search": {"configured": [], "fallback_chain": ["context7", "exa"], "ok": False},
-            "web_fetch": {"configured": [], "fallback_chain": ["tavily", "firecrawl"], "ok": False},
+            "web_fetch": {"configured": [], "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"], "ok": False},
         },
     )
     cases.append(

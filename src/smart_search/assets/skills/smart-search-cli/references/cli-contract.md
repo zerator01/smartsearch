@@ -21,6 +21,11 @@
 - `smart-search exa-search QUERY [--num-results N] [--search-type neural|keyword|auto] [--include-text] [--include-highlights] [--start-published-date YYYY-MM-DD] [--include-domains DOMAIN...] [--exclude-domains DOMAIN...] [--category NAME] [--format json|markdown|content] [--output PATH]`
 - `smart-search exa-similar URL [--num-results N] [--format json|markdown|content] [--output PATH]`
 - `smart-search zhipu-search QUERY [--count N] [--search-engine NAME] [--search-recency-filter VALUE] [--search-domain-filter DOMAIN] [--content-size medium|high] [--format json|markdown|content] [--output PATH]`
+- `smart-search zhipu-mcp-search QUERY [--count N] [--format json|markdown|content] [--output PATH]`
+- `smart-search zhipu-mcp-reader URL [--format json|markdown|content] [--output PATH]`
+- `smart-search zhipu-mcp-search-doc REPO QUERY [--max-results N] [--format json|markdown|content] [--output PATH]`
+- `smart-search zhipu-mcp-repo-structure REPO [--ref REF] [--format json|markdown|content] [--output PATH]`
+- `smart-search zhipu-mcp-read-file REPO PATH [--ref REF] [--format json|markdown|content] [--output PATH]`
 - `smart-search anysearch-domains [DOMAIN] [--format json|markdown|content] [--output PATH]`
 - `smart-search anysearch-search QUERY [--domain DOMAIN] [--sub-domain SUB_DOMAIN] [--max-results N] [--format json|markdown|content] [--output PATH]`
 - `smart-search anysearch-extract URL [--max-length N] [--format json|markdown|content] [--output PATH]`
@@ -31,7 +36,7 @@
 - `smart-search map URL [--instructions TEXT] [--max-depth N] [--max-breadth N] [--limit N] [--timeout SECONDS] [--format json|markdown|content] [--output PATH]`
 - `smart-search doctor [--format json|markdown|content] [--output PATH]`
 - `smart-search diagnose openai-compatible [--timeout SECONDS] [--format json|markdown] [--output PATH]`
-- `smart-search setup [--lang zh|en] [--advanced] [--non-interactive] [--skip-skills] [--install-skills CSV] [--skills-root PATH] [--xai-api-url URL] [--xai-api-key KEY] [--xai-model ID] [--xai-tools-explicit CSV] [--openai-compatible-api-url URL] [--openai-compatible-api-key KEY] [--openai-compatible-model ID] [--openai-compatible-stream true|false] [--validation-level fast|balanced|strict] [--fallback-mode auto|off] [--minimum-profile standard|off] [--exa-key KEY] [--context7-key KEY] [--zhipu-key KEY] [--zhipu-api-url URL] [--zhipu-search-engine ENGINE] [--tavily-api-url URL] [--tavily-key KEY] [--firecrawl-api-url URL] [--firecrawl-key KEY] [--anysearch-api-url URL] [--anysearch-key KEY] [--anysearch-timeout SECONDS] [--format json|markdown|content] [--output PATH]`
+- `smart-search setup [--lang zh|en] [--advanced] [--non-interactive] [--skip-skills] [--install-skills CSV] [--skills-root PATH] [--xai-api-url URL] [--xai-api-key KEY] [--xai-model ID] [--xai-tools-explicit CSV] [--openai-compatible-api-url URL] [--openai-compatible-api-key KEY] [--openai-compatible-model ID] [--openai-compatible-stream true|false] [--validation-level fast|balanced|strict] [--fallback-mode auto|off] [--minimum-profile standard|off] [--exa-key KEY] [--context7-key KEY] [--zhipu-key KEY] [--zhipu-api-url URL] [--zhipu-search-engine ENGINE] [--zhipu-mcp-key KEY] [--zhipu-mcp-search-api-url URL] [--zhipu-mcp-reader-api-url URL] [--zhipu-mcp-zread-api-url URL] [--zhipu-mcp-timeout SECONDS] [--jina-key KEY] [--jina-reader-api-url URL] [--jina-respond-with MODE] [--jina-timeout SECONDS] [--tavily-api-url URL] [--tavily-key KEY] [--firecrawl-api-url URL] [--firecrawl-key KEY] [--anysearch-api-url URL] [--anysearch-key KEY] [--anysearch-timeout SECONDS] [--format json|markdown|content] [--output PATH]`
 - `smart-search config path [--format json|markdown|content] [--output PATH]`
 - `smart-search config list [--format json|markdown|content] [--output PATH]`
 - `smart-search config set KEY VALUE [--format json|markdown|content] [--output PATH]`
@@ -55,6 +60,11 @@ Top-level aliases must normalize to the same service behavior as their full comm
 | `exa-search` | `exa`, `x` |
 | `exa-similar` | `xs` |
 | `zhipu-search` | `z`, `zp` |
+| `zhipu-mcp-search` | `zmcp-search` |
+| `zhipu-mcp-reader` | `zmcp-reader` |
+| `zhipu-mcp-search-doc` | `zmcp-doc` |
+| `zhipu-mcp-repo-structure` | `zmcp-tree` |
+| `zhipu-mcp-read-file` | `zmcp-file` |
 | `anysearch-domains` | `as-domains` |
 | `anysearch-search` | `as-search`, `as` |
 | `anysearch-extract` | `as-extract` |
@@ -104,7 +114,7 @@ Exa domain filters:
 - This normalization is intentional for Windows PowerShell, where an unquoted comma expression can be forwarded through `.ps1` wrappers as a space-separated value.
 - `source_warning`: non-empty when extra source candidates were appended.
 
-Fetch output includes `ok`, `url`, `provider`, `content`, and `elapsed_ms`.
+Fetch output includes `ok`, `url`, `provider`, `content`, `provider_attempts`, `fallback_used`, and `elapsed_ms`.
 
 Zhipu Web Search API setup:
 
@@ -117,6 +127,25 @@ Zhipu Web Search API setup:
 - `zhipu-search` corresponds to Zhipu Web Search API, not Zhipu Chat Completions `tools=[web_search]`, not Search Agent, and not the MCP Server.
 - `TAVILY_API_URL` only affects Tavily and does not proxy Zhipu.
 - `TAVILY_TIMEOUT_SECONDS` controls the Tavily `doctor` connectivity timeout. It defaults to `30` so slower pooled/community endpoints are not incorrectly marked unhealthy by the diagnostic check.
+
+Zhipu Coding Plan Remote MCP setup:
+
+- `ZHIPU_MCP_API_KEY` configures the Coding Plan MCP auth token and must be sent as `Authorization: Bearer ...`; it must never be logged unmasked.
+- `ZHIPU_MCP_SEARCH_API_URL` defaults to `https://open.bigmodel.cn/api/mcp/web_search_prime/mcp` and calls `webSearchPrime` for `web_search`.
+- `ZHIPU_MCP_READER_API_URL` defaults to `https://open.bigmodel.cn/api/mcp/web_reader/mcp` and calls `webReader` for `web_fetch`.
+- `ZHIPU_MCP_ZREAD_API_URL` defaults to `https://open.bigmodel.cn/api/mcp/zread/mcp` and calls `search_doc`, `get_repo_structure`, and `read_file` through explicit repo/docs commands.
+- Zhipu Coding Plan MCP must be implemented as a separate Remote MCP-over-HTTP provider layer. Do not route it through the existing `/paas/v4/web_search` Zhipu REST provider.
+- Provider failures must appear in `provider_attempts` and fallback must remain same-capability.
+- `doctor` should report configured/not-configured, auth, rate-limit, provider, timeout, and network status without exposing the MCP token.
+
+Jina Reader setup:
+
+- `JINA_READER_API_URL` defaults to `https://r.jina.ai`.
+- `JINA_API_KEY` is required before Jina satisfies `SMART_SEARCH_MINIMUM_PROFILE=standard`.
+- Anonymous Jina Reader calls may be used only as explicit/experimental degraded fetch behavior; they must not make standard setup pass.
+- `JINA_RESPOND_WITH=readerlm-v2` requires `JINA_API_KEY` and should report a configuration error without a network request when the key is missing.
+- Jina Reader is `web_fetch` only, not `web_search`.
+- Jina 401/403, 422, 429, timeout, network errors, and low-quality challenge pages such as `Title: Just a moment...` must be reported as failed provider attempts and allow same-capability fallback.
 
 OpenAI-compatible streaming:
 
@@ -142,6 +171,8 @@ Exa HTTP `400` or `422` failures are returned as `ok=false` with `error_type=par
 Exa similar output includes `ok`, `url`, `results`, `total`, and `elapsed_ms` when successful.
 
 Zhipu search output includes `ok`, `query`, `provider`, `search_engine`, `results`, `total`, and `elapsed_ms` when successful.
+
+Zhipu MCP command output includes `ok`, `provider`, `tool`, `elapsed_ms`, and either `content` for reader/file-like tools or `results` plus `total` for search-like tools.
 
 Context7 library output includes `ok`, `query`, `provider`, `results`, `total`, and `elapsed_ms` when successful. Context7 docs output includes `ok`, `library_id`, `query`, `provider`, `results`, `total`, `content`, and `elapsed_ms` when successful.
 
@@ -300,18 +331,21 @@ Agent timeout handling contract:
 - Chat Completions mode must not send xAI `web_search` / `x_search` tools or legacy `search_parameters`; xAI Chat Completions Live Search is deprecated.
 - Standard minimum profile requires `main_search`, `docs_search`, and fetch capability. Missing required capabilities produce a configuration error.
 - Optional experimental `vertical_search` may report AnySearch when `ANYSEARCH_API_KEY` is configured, but it is not part of the `web_search` fallback and is not required by the `standard` minimum profile.
+- Jina satisfies fetch capability only when `JINA_API_KEY` is configured. Anonymous Jina Reader does not satisfy `standard`.
 - Same-capability fallback is allowed; cross-capability fallback is not. Context7 is not used for unrelated broad web queries, and page extraction providers are not used as docs search providers.
 - `main_search`: xAI Responses first for Grok/xAI, then OpenAI-compatible answer fallback when that peer provider is separately configured and `--fallback auto` is active.
-- `web_search`: Zhipu first when routed in, then Tavily / Firecrawl source search when configured.
+- `web_search`: Zhipu Web Search API first when routed in, then Zhipu Coding Plan MCP `webSearchPrime`, then Tavily / Firecrawl source search when configured.
 - `docs_search`: Context7 first for library/API/docs intent, then Exa for official-domain, paper, product-page, trusted-site, or low-noise supplemental discovery.
-- Fetch capability: Tavily first, then Firecrawl.
+- Fetch capability: Tavily first, then Jina Reader with `JINA_API_KEY`, then Zhipu Coding Plan MCP `webReader`, then Firecrawl.
 - `search` calls Tavily and/or Firecrawl only when `--extra-sources` is greater than 0.
 - If both Tavily and Firecrawl are configured, `search --extra-sources N` gives about 60% of extra source slots to Tavily and the remainder to Firecrawl.
 - `extra_sources` are retrieved in parallel and are not automatically used by the primary model to verify its answer.
-- `fetch` tries Tavily first, then Firecrawl as fallback when Tavily returns no content.
+- `fetch` and known-URL `search "https://..."` use the same fetch fallback chain.
+- `fetch` tries Tavily first, then Jina Reader with `JINA_API_KEY`, then Zhipu Coding Plan MCP Reader, then Firecrawl.
 - `map` uses Tavily only.
 - `exa-search` and `exa-similar` use Exa only.
 - `zhipu-search` uses Zhipu only.
+- `zhipu-mcp-search`, `zhipu-mcp-reader`, and `zhipu-mcp-*` zread commands use Zhipu Coding Plan Remote MCP only.
 - `anysearch-domains`, `anysearch-search`, `anysearch-extract`, and `anysearch-batch` use AnySearch only and do not participate in default fallback chains.
 - `context7-library` and `context7-docs` use Context7 only.
 - Runtime config priority is environment variables first, then local config file, then defaults.

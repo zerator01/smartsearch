@@ -28,6 +28,15 @@ def _reset_config(monkeypatch, tmp_path):
         "ZHIPU_API_URL",
         "ZHIPU_SEARCH_ENGINE",
         "ZHIPU_TIMEOUT_SECONDS",
+        "ZHIPU_MCP_API_KEY",
+        "ZHIPU_MCP_SEARCH_API_URL",
+        "ZHIPU_MCP_READER_API_URL",
+        "ZHIPU_MCP_ZREAD_API_URL",
+        "ZHIPU_MCP_TIMEOUT_SECONDS",
+        "JINA_API_KEY",
+        "JINA_READER_API_URL",
+        "JINA_RESPOND_WITH",
+        "JINA_TIMEOUT_SECONDS",
         "TAVILY_API_KEY",
         "TAVILY_API_URL",
         "FIRECRAWL_API_KEY",
@@ -118,6 +127,38 @@ def test_anysearch_config_defaults_and_saved_values(monkeypatch, tmp_path):
     assert service.config.anysearch_api_url == "https://anysearch.example.com/mcp"
     assert service.config.anysearch_api_key == "as-test-secret"
     assert service.config.anysearch_timeout == 9.0
+
+
+def test_jina_and_zhipu_mcp_config_defaults_and_saved_values(monkeypatch, tmp_path):
+    _reset_config(monkeypatch, tmp_path)
+
+    assert service.config.jina_reader_api_url == "https://r.jina.ai"
+    assert service.config.jina_api_key is None
+    assert service.config.jina_respond_with == ""
+    assert service.config.jina_timeout == 30.0
+    assert service.config.zhipu_mcp_search_api_url == "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp"
+    assert service.config.zhipu_mcp_reader_api_url == "https://open.bigmodel.cn/api/mcp/web_reader/mcp"
+    assert service.config.zhipu_mcp_zread_api_url == "https://open.bigmodel.cn/api/mcp/zread/mcp"
+
+    service.config_set("JINA_API_KEY", "jina-test-secret")
+    service.config_set("JINA_READER_API_URL", "https://reader.example.com")
+    service.config_set("JINA_RESPOND_WITH", "readerlm-v2")
+    service.config_set("JINA_TIMEOUT_SECONDS", "11")
+    service.config_set("ZHIPU_MCP_API_KEY", "zmcp-test-secret")
+    service.config_set("ZHIPU_MCP_SEARCH_API_URL", "https://zmcp.example.com/search")
+    service.config_set("ZHIPU_MCP_READER_API_URL", "https://zmcp.example.com/reader")
+    service.config_set("ZHIPU_MCP_ZREAD_API_URL", "https://zmcp.example.com/zread")
+    service.config_set("ZHIPU_MCP_TIMEOUT_SECONDS", "12")
+
+    assert service.config.jina_api_key == "jina-test-secret"
+    assert service.config.jina_reader_api_url == "https://reader.example.com"
+    assert service.config.jina_respond_with == "readerlm-v2"
+    assert service.config.jina_timeout == 11.0
+    assert service.config.zhipu_mcp_api_key == "zmcp-test-secret"
+    assert service.config.zhipu_mcp_search_api_url == "https://zmcp.example.com/search"
+    assert service.config.zhipu_mcp_reader_api_url == "https://zmcp.example.com/reader"
+    assert service.config.zhipu_mcp_zread_api_url == "https://zmcp.example.com/zread"
+    assert service.config.zhipu_mcp_timeout == 12.0
 
 
 def test_environment_overrides_config_file(monkeypatch, tmp_path):
@@ -529,6 +570,86 @@ def test_anysearch_vertical_status_is_experimental_and_not_minimum_required(monk
     assert with_anysearch["capability_status"]["vertical_search"]["configured"] == ["anysearch"]
 
 
+def test_jina_key_satisfies_web_fetch_but_anonymous_jina_does_not(monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_MINIMUM_PROFILE", "standard")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-secret")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.delenv("JINA_API_KEY", raising=False)
+    monkeypatch.setenv("JINA_READER_API_URL", "https://r.jina.ai")
+
+    without_key = service.validate_minimum_profile()
+    assert without_key["ok"] is False
+    assert "web_fetch" in without_key["missing"]
+    assert "jina" not in without_key["capability_status"]["web_fetch"]["configured"]
+
+    monkeypatch.setenv("JINA_API_KEY", "jina-test-secret")
+    with_key = service.validate_minimum_profile()
+    assert with_key["ok"] is True
+    assert with_key["missing"] == []
+    assert with_key["capability_status"]["web_fetch"]["configured"] == ["jina"]
+
+
+def test_zhipu_mcp_key_satisfies_web_search_and_reader_fetch_as_separate_provider(monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_MINIMUM_PROFILE", "standard")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-secret")
+    monkeypatch.setenv("ZHIPU_MCP_API_KEY", "zmcp-test-secret")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+
+    result = service.validate_minimum_profile()
+
+    assert result["ok"] is True
+    assert result["missing"] == []
+    assert result["capability_status"]["web_search"]["configured"] == ["zhipu-mcp"]
+    assert result["capability_status"]["web_search"]["fallback_chain"] == ["zhipu", "zhipu-mcp", "tavily", "firecrawl"]
+    assert result["capability_status"]["web_fetch"]["configured"] == ["zhipu-mcp-reader"]
+
+
+@pytest.mark.asyncio
+async def test_zhipu_mcp_web_search_error_records_attempt_and_falls_back_same_capability(monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_MINIMUM_PROFILE", "standard")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-secret")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-test-secret")
+    monkeypatch.setenv("ZHIPU_MCP_API_KEY", "zmcp-test-secret")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-test-secret")
+
+    async def fake_search(self, query, platform="", ctx=None):
+        return "Answer."
+
+    async def failing_zhipu_mcp(query, count=5):
+        return {
+            "ok": False,
+            "provider": "zhipu-mcp",
+            "tool": "webSearchPrime",
+            "error_type": "provider_error",
+            "error": "provider unavailable",
+        }
+
+    async def yes_tavily(query, max_results=6):
+        return [{"url": "https://fallback.example.com", "title": "Fallback", "content": "fallback source"}]
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
+    monkeypatch.setattr(service, "zhipu_mcp_search", failing_zhipu_mcp)
+    monkeypatch.setattr(service, "call_tavily_search", yes_tavily)
+
+    result = await service.search("latest MCP status", validation="strict")
+
+    web_attempts = [attempt for attempt in result["provider_attempts"] if attempt["capability"] == "web_search"]
+    assert result["ok"] is True
+    assert [attempt["provider"] for attempt in web_attempts[:2]] == ["zhipu-mcp", "tavily"]
+    assert web_attempts[0]["status"] == "error"
+    assert web_attempts[0]["error_type"] == "provider_error"
+    assert web_attempts[1]["status"] == "ok"
+    assert result["extra_sources"][0]["provider"] == "tavily"
+
+
 @pytest.mark.asyncio
 async def test_search_provider_filter_can_select_openai_compatible(monkeypatch):
     monkeypatch.setenv("XAI_API_KEY", "xai-test-secret")
@@ -725,6 +846,8 @@ async def test_search_reports_primary_provider_http_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fetch_prefers_tavily(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-secret")
+
     async def yes_tavily(url):
         return "# Tavily Page"
 
@@ -743,6 +866,9 @@ async def test_fetch_prefers_tavily(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fetch_fallbacks_to_firecrawl(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-secret")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-secret")
+
     async def no_tavily(url):
         return None
 
@@ -757,6 +883,61 @@ async def test_fetch_fallbacks_to_firecrawl(monkeypatch):
     assert result["ok"] is True
     assert result["provider"] == "firecrawl"
     assert result["content"] == "# Page"
+
+
+@pytest.mark.asyncio
+async def test_fetch_uses_shared_chain_and_falls_back_after_jina_quality_error(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-secret")
+    monkeypatch.setenv("JINA_API_KEY", "jina-secret")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-secret")
+
+    async def no_tavily(url):
+        return None
+
+    async def bad_jina(url):
+        return {"ok": False, "provider": "jina", "error_type": "quality_error", "error": "challenge"}
+
+    async def yes_firecrawl(url, ctx=None):
+        return "# Page"
+
+    monkeypatch.setattr(service, "call_tavily_extract", no_tavily)
+    monkeypatch.setattr(service, "jina_fetch", bad_jina)
+    monkeypatch.setattr(service, "call_firecrawl_scrape", yes_firecrawl)
+
+    result = await service.fetch("https://example.com")
+
+    assert result["ok"] is True
+    assert result["provider"] == "firecrawl"
+    assert [a["provider"] for a in result["provider_attempts"]] == ["tavily", "jina", "firecrawl"]
+    assert result["provider_attempts"][1]["error_type"] == "quality_error"
+
+
+@pytest.mark.asyncio
+async def test_search_known_url_uses_same_fetch_chain_as_fetch(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-secret")
+    monkeypatch.setenv("JINA_API_KEY", "jina-secret")
+
+    async def fake_search(self, query, platform="", ctx=None):
+        return "Answer."
+
+    captured = {}
+
+    async def yes_jina(url):
+        captured["url"] = url
+        return {"ok": True, "provider": "jina", "url": url, "content": "# Jina Page"}
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
+    monkeypatch.setattr(service, "jina_fetch", yes_jina)
+
+    result = await service.search("请抓取 https://example.com/docs?x=1 后总结", validation="balanced")
+
+    assert result["ok"] is True
+    assert captured["url"] == "https://example.com/docs?x=1"
+    attempts = [a for a in result["provider_attempts"] if a["capability"] == "web_fetch"]
+    assert [a["provider"] for a in attempts] == ["jina"]
+    assert result["extra_sources"][0]["provider"] == "jina"
 
 
 @pytest.mark.asyncio
@@ -1363,8 +1544,16 @@ async def test_doctor_tests_main_providers_independently(monkeypatch):
     async def fake_tavily_connection():
         return {"status": "ok", "message": "tavily ok"}
 
+    async def fake_jina_connection():
+        return {"status": "not_configured", "message": "missing"}
+
+    async def fake_zhipu_mcp_connection():
+        return {"status": "not_configured", "message": "missing"}
+
     monkeypatch.setattr(service, "_test_exa_connection", fake_exa_connection)
     monkeypatch.setattr(service, "_test_tavily_connection", fake_tavily_connection)
+    monkeypatch.setattr(service, "_test_jina_connection", fake_jina_connection)
+    monkeypatch.setattr(service, "_test_zhipu_mcp_connection", fake_zhipu_mcp_connection)
 
     result = await service.doctor()
 
@@ -1372,6 +1561,86 @@ async def test_doctor_tests_main_providers_independently(monkeypatch):
     assert result["primary_connection_test"]["status"] == "timeout"
     assert result["main_search_connection_tests"]["xai-responses"]["status"] == "timeout"
     assert result["main_search_connection_tests"]["openai-compatible"]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_jina_doctor_reports_readerlm_without_key_as_config_error(monkeypatch):
+    monkeypatch.setenv("JINA_RESPOND_WITH", "readerlm-v2")
+    monkeypatch.delenv("JINA_API_KEY", raising=False)
+
+    result = await service._test_jina_connection()
+
+    assert result["status"] == "config_error"
+    assert "JINA_API_KEY" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_call_jina_reader_decodes_provider_json(monkeypatch):
+    class FakeJinaReaderProvider:
+        def __init__(self, reader_api_url, api_key, respond_with, timeout):
+            pass
+
+        async def fetch(self, url):
+            return json.dumps({"ok": True, "provider": "jina", "url": url, "content": "# Page"})
+
+    monkeypatch.setattr(service, "JinaReaderProvider", FakeJinaReaderProvider)
+
+    result = await service.call_jina_reader("https://example.com")
+
+    assert result == {"ok": True, "provider": "jina", "url": "https://example.com", "content": "# Page"}
+
+
+@pytest.mark.asyncio
+async def test_zhipu_mcp_service_wrappers_decode_provider_json(monkeypatch):
+    calls = []
+
+    class FakeZhipuMCPProvider:
+        def __init__(self, api_url, api_key, timeout, provider_id="zhipu-mcp"):
+            calls.append(("init", provider_id, api_url, api_key, timeout))
+            self.provider_id = provider_id
+
+        async def web_search(self, query, count=5):
+            calls.append(("web_search", query, count))
+            return json.dumps({"ok": True, "provider": self.provider_id, "tool": "webSearchPrime", "query": query})
+
+        async def web_reader(self, url):
+            calls.append(("web_reader", url))
+            return json.dumps({"ok": True, "provider": self.provider_id, "tool": "webReader", "url": url, "content": "# Page"})
+
+        async def search_doc(self, repo, query, max_results=5):
+            calls.append(("search_doc", repo, query, max_results))
+            return json.dumps({"ok": True, "provider": self.provider_id, "tool": "search_doc", "repo": repo})
+
+        async def get_repo_structure(self, repo, ref=""):
+            calls.append(("get_repo_structure", repo, ref))
+            return json.dumps({"ok": True, "provider": self.provider_id, "tool": "get_repo_structure", "repo": repo})
+
+        async def read_file(self, repo, path, ref=""):
+            calls.append(("read_file", repo, path, ref))
+            return json.dumps({"ok": True, "provider": self.provider_id, "tool": "read_file", "path": path})
+
+    monkeypatch.setenv("ZHIPU_MCP_API_KEY", "zmcp-test-secret")
+    monkeypatch.setenv("ZHIPU_MCP_TIMEOUT_SECONDS", "7")
+    monkeypatch.setattr(service, "ZhipuMCPProvider", FakeZhipuMCPProvider)
+
+    search = await service.zhipu_mcp_search("query", count=2)
+    reader = await service.zhipu_mcp_reader("https://example.com")
+    doc = await service.zhipu_mcp_search_doc("owner/repo", "install", max_results=3)
+    tree = await service.zhipu_mcp_repo_structure("owner/repo", ref="main")
+    file_data = await service.zhipu_mcp_read_file("owner/repo", "README.md", ref="main")
+
+    assert search["tool"] == "webSearchPrime"
+    assert reader["content"] == "# Page"
+    assert doc["tool"] == "search_doc"
+    assert tree["tool"] == "get_repo_structure"
+    assert file_data["path"] == "README.md"
+    assert calls[0] == (
+        "init",
+        "zhipu-mcp",
+        "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp",
+        "zmcp-test-secret",
+        7.0,
+    )
 
 
 @pytest.mark.asyncio
