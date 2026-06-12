@@ -13,6 +13,23 @@ from .utils import extract_unique_urls
 
 _MD_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
 _INLINE_CITATION_LINK_PATTERN = re.compile(r"\[\[(\d+)\]\]\((https?://[^)]+)\)")
+_JUNK_NUMERIC_TITLE_PATTERN = re.compile(r"^\[?\d{1,3}\]?$")
+
+
+def clean_source_title(value: Any) -> str | None:
+    """Return a usable source title, or None when the value is junk.
+
+    Citation renderers (xAI responses, multi-agent search answers) often emit
+    the citation index ("1", "[2]") where a title belongs. A bare 1-3 digit
+    number is never a real page title, so treat it as absent and let callers
+    fall back to a titleless entry. 4+ digit strings (e.g. "1984") are kept.
+    """
+    if not isinstance(value, str):
+        return None
+    title = value.strip()
+    if not title or _JUNK_NUMERIC_TITLE_PATTERN.match(title):
+        return None
+    return title
 _SOURCES_HEADING_PATTERN = re.compile(
     r"(?im)^"
     r"(?:#{1,6}\s*)?"
@@ -364,12 +381,12 @@ def _normalize_sources(data: Any) -> list[dict]:
             continue
 
         if isinstance(item, (list, tuple)) and len(item) >= 2:
-            title, url = item[0], item[1]
+            title, url = clean_source_title(item[0]), item[1]
             if isinstance(url, str) and url.startswith(("http://", "https://")) and url not in seen:
                 seen.add(url)
                 out: dict = {"url": url}
-                if isinstance(title, str) and title.strip():
-                    out["title"] = title.strip()
+                if title:
+                    out["title"] = title
                 normalized.append(out)
             continue
 
@@ -381,9 +398,11 @@ def _normalize_sources(data: Any) -> list[dict]:
                 continue
             seen.add(url)
             out: dict = {"url": url}
-            title = item.get("title") or item.get("name") or item.get("label")
-            if isinstance(title, str) and title.strip():
-                out["title"] = title.strip()
+            for candidate in (item.get("title"), item.get("name"), item.get("label")):
+                title = clean_source_title(candidate)
+                if title:
+                    out["title"] = title
+                    break
             desc = item.get("description") or item.get("snippet") or item.get("content")
             if isinstance(desc, str) and desc.strip():
                 out["description"] = desc.strip()
@@ -402,7 +421,7 @@ def _extract_sources_from_text(text: str) -> list[dict]:
         if not url or url in seen:
             continue
         seen.add(url)
-        title = (title or "").strip()
+        title = clean_source_title(title)
         if title:
             sources.append({"title": title, "url": url})
         else:
@@ -420,10 +439,12 @@ def _extract_sources_from_text(text: str) -> list[dict]:
 def _extract_inline_citation_sources(text: str) -> list[dict]:
     sources: list[dict] = []
     seen: set[str] = set()
-    for number, url in _INLINE_CITATION_LINK_PATTERN.findall(text or ""):
+    for _number, url in _INLINE_CITATION_LINK_PATTERN.findall(text or ""):
         url = (url or "").strip()
         if not url or url in seen:
             continue
         seen.add(url)
-        sources.append({"title": number, "url": url})
+        # The citation index is not a title; emit a titleless entry so
+        # downstream consumers fall back to their own title resolution.
+        sources.append({"url": url})
     return sources

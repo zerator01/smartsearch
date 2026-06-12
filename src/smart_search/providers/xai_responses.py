@@ -9,6 +9,7 @@ from .base import BaseSearchProvider
 from .openai_compatible import _WaitWithRetryAfter, _is_retryable_exception, get_local_time_info
 from ..config import config
 from ..logger import log_info
+from ..sources import clean_source_title
 from ..utils import search_prompt
 
 
@@ -104,9 +105,9 @@ class XAIResponsesSearchProvider(BaseSearchProvider):
                         continue
                     seen.add(url)
                     source: dict[str, str] = {"url": url}
-                    title = annotation.get("title")
-                    if isinstance(title, str) and title.strip():
-                        source["title"] = title.strip()
+                    title = clean_source_title(annotation.get("title"))
+                    if title:
+                        source["title"] = title
                     sources.append(source)
 
         answer = "\n\n".join(part.strip() for part in text_parts if part.strip()).strip()

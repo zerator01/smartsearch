@@ -1,6 +1,11 @@
-from typing import List
+from typing import TYPE_CHECKING, List
 import re
-from .providers.base import SearchResult
+
+if TYPE_CHECKING:
+    # Typing-only import: a runtime import inverts the layering (providers
+    # import utils back) and makes any cold `smart_search.utils` /
+    # `smart_search.sources` import die in a circular-import ImportError.
+    from .providers.base import SearchResult
 
 _URL_PATTERN = re.compile(r'https?://[^\s<>"\'`，。、；：！？》）】\)]+')
 
@@ -52,7 +57,7 @@ def format_extra_sources(tavily_results: list[dict] | None, firecrawl_results: l
     return "\n\n".join(sections)
 
 
-def format_search_results(results: List[SearchResult]) -> str:
+def format_search_results(results: "List[SearchResult]") -> str:
     if not results:
         return "No results found."
 

@@ -1,6 +1,7 @@
 import pytest
 
 from smart_search.sources import (
+    clean_source_title,
     sanitize_answer_text,
     split_answer_and_sources,
     merge_sources,
@@ -96,6 +97,54 @@ class TestSplitAnswerAndSources:
         answer, sources = split_answer_and_sources(text)
         assert "[[1]](https://example.com/a)" in answer
         assert [s["url"] for s in sources] == ["https://example.com/a", "https://example.com/b"]
+
+
+class TestNumericTitleGuard:
+    """Regression: citation indexes must never surface as source titles.
+
+    Observed in the wild (IKOS discovery, 2026-06-12): grok multi-agent answers
+    cite as [[1]](url), and the extracted sources carried title "1", "2", ...
+    polluting every downstream consumer that trusts `title`.
+    """
+
+    def test_clean_source_title_rejects_citation_indexes(self):
+        assert clean_source_title("1") is None
+        assert clean_source_title(" 23 ") is None
+        assert clean_source_title("[2]") is None
+        assert clean_source_title("") is None
+        assert clean_source_title(None) is None
+
+    def test_clean_source_title_keeps_real_titles(self):
+        assert clean_source_title("National Time Service Center") == "National Time Service Center"
+        assert clean_source_title("1984") == "1984"  # 4+ digits can be a real title
+
+    def test_inline_citation_sources_have_no_numeric_title(self):
+        text = "Cites [[1]](https://example.com/a) and [[2]](https://example.com/b)."
+        _, sources = split_answer_and_sources(text)
+        assert [s["url"] for s in sources] == ["https://example.com/a", "https://example.com/b"]
+        assert all("title" not in s for s in sources)
+
+    def test_markdown_numeric_link_text_is_not_a_title(self):
+        text = (
+            "Answer.\n\n## Sources\n"
+            "- [3](https://example.com/a)\n"
+            "- [Real Title](https://example.com/b)"
+        )
+        _, sources = split_answer_and_sources(text)
+        by_url = {s["url"]: s for s in sources}
+        assert "title" not in by_url["https://example.com/a"]
+        assert by_url["https://example.com/b"]["title"] == "Real Title"
+
+    def test_function_sources_numeric_title_falls_back_to_name(self):
+        text = 'A.\n\nsources([{"url": "https://example.com/a", "title": "2", "name": "Real Name"}])'
+        _, sources = split_answer_and_sources(text)
+        assert sources[0]["title"] == "Real Name"
+
+    def test_function_sources_numeric_title_dropped_when_no_fallback(self):
+        text = 'A.\n\nsources([{"url": "https://example.com/a", "title": "7"}])'
+        _, sources = split_answer_and_sources(text)
+        assert sources[0]["url"] == "https://example.com/a"
+        assert "title" not in sources[0]
 
 
 class TestMergeSources:
