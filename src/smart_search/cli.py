@@ -2325,6 +2325,7 @@ def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str],
         ("XAI_API_URL", "xAI Responses API URL", True),
         ("XAI_API_KEY", "xAI API key", True),
         ("XAI_MODEL", "xAI Responses model", True),
+        ("XAI_MODEL_FALLBACKS", "xAI Responses model fallbacks (comma-separated)", True),
         ("XAI_TOOLS", "xAI Responses tools (web_search,x_search)", True),
         ("OPENAI_COMPATIBLE_API_URL", "OpenAI-compatible API URL", True),
         ("OPENAI_COMPATIBLE_API_KEY", "OpenAI-compatible API key", True),
@@ -2589,6 +2590,7 @@ def _run_setup(args: argparse.Namespace) -> int:
         "XAI_API_URL": args.xai_api_url,
         "XAI_API_KEY": args.xai_api_key,
         "XAI_MODEL": args.xai_model,
+        "XAI_MODEL_FALLBACKS": args.xai_model_fallbacks,
         "XAI_TOOLS": args.xai_tools_explicit,
         "OPENAI_COMPATIBLE_API_URL": args.openai_compatible_api_url,
         "OPENAI_COMPATIBLE_API_KEY": args.openai_compatible_api_key,
@@ -3071,6 +3073,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--xai-api-url", default="", help="Save XAI_API_URL.")
     setup_parser.add_argument("--xai-api-key", default="", help="Save XAI_API_KEY.")
     setup_parser.add_argument("--xai-model", default="", help="Save XAI_MODEL.")
+    setup_parser.add_argument("--xai-model-fallbacks", default="", help="Save XAI_MODEL_FALLBACKS.")
     setup_parser.add_argument("--xai-tools-explicit", default="", help="Save XAI_TOOLS.")
     setup_parser.add_argument("--openai-compatible-api-url", default="", help="Save OPENAI_COMPATIBLE_API_URL.")
     setup_parser.add_argument("--openai-compatible-api-key", default="", help="Save OPENAI_COMPATIBLE_API_KEY.")

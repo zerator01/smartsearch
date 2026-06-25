@@ -15,6 +15,7 @@ def _reset_config(monkeypatch, tmp_path):
         "XAI_API_URL",
         "XAI_API_KEY",
         "XAI_MODEL",
+        "XAI_MODEL_FALLBACKS",
         "XAI_TOOLS",
         "OPENAI_COMPATIBLE_API_URL",
         "OPENAI_COMPATIBLE_API_KEY",
@@ -107,6 +108,7 @@ def test_config_file_supplies_explicit_main_settings(monkeypatch, tmp_path):
     service.config_set("XAI_API_URL", "https://xai.example.com/v1")
     service.config_set("XAI_API_KEY", "xai-config-secret")
     service.config_set("XAI_MODEL", "xai-config-model")
+    service.config_set("XAI_MODEL_FALLBACKS", "xai-fallback-model")
     service.config_set("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
     service.config_set("OPENAI_COMPATIBLE_API_KEY", "relay-config-secret")
     service.config_set("OPENAI_COMPATIBLE_MODEL", "relay-config-model")
@@ -114,6 +116,8 @@ def test_config_file_supplies_explicit_main_settings(monkeypatch, tmp_path):
     assert service.config.xai_api_url == "https://xai.example.com/v1"
     assert service.config.xai_api_key == "xai-config-secret"
     assert service.config.xai_model == "xai-config-model"
+    assert service.config.xai_model_fallbacks_raw == "xai-fallback-model"
+    assert service.config.parse_xai_model_fallbacks() == ["xai-fallback-model"]
     assert service.config.openai_compatible_api_url == "https://relay.example.com/v1"
     assert service.config.openai_compatible_api_key == "relay-config-secret"
     assert service.config.openai_compatible_model == "relay-config-model"
@@ -852,6 +856,15 @@ def test_xai_tools_validation(monkeypatch, tmp_path):
         service.config.parse_xai_tools()
 
 
+def test_xai_model_fallbacks_are_deduped_against_primary(monkeypatch, tmp_path):
+    _reset_config(monkeypatch, tmp_path)
+
+    service.config_set("XAI_MODEL", "primary-model")
+    service.config_set("XAI_MODEL_FALLBACKS", "fallback-a, primary-model, fallback-a, fallback-b")
+
+    assert service.config.parse_xai_model_fallbacks() == ["fallback-a", "fallback-b"]
+
+
 @pytest.mark.asyncio
 async def test_zhipu_search_uses_configured_engine_and_command_override(monkeypatch, tmp_path):
     _reset_config(monkeypatch, tmp_path)
@@ -999,6 +1012,65 @@ async def test_search_fallbacks_from_xai_responses_to_openai_compatible(monkeypa
     assert captured == [
         ("XAIResponsesSearchProvider", "https://api.x.ai/v1", "xai-test-secret", "xai-model"),
         ("OpenAICompatibleSearchProvider", "https://relay.example.com/v1", "relay-test-secret", "relay-model"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_search_fallbacks_between_xai_response_models(monkeypatch):
+    monkeypatch.setenv("XAI_API_KEY", "xai-test-secret")
+    monkeypatch.setenv("XAI_MODEL", "primary-model")
+    monkeypatch.setenv("XAI_MODEL_FALLBACKS", "fallback-model,primary-model")
+    captured = []
+
+    async def xai_by_model(self, query, platform="", ctx=None):
+        captured.append(self.model)
+        if self.model == "primary-model":
+            request = httpx.Request("POST", "https://api.x.ai/v1/responses")
+            response = httpx.Response(503, text="responses unavailable", request=request)
+            raise httpx.HTTPStatusError("responses unavailable", request=request, response=response)
+        return 'Fallback answer.\n\nsources([{"url":"https://fallback.example.com","title":"Fallback"}])'
+
+    monkeypatch.setattr(service.XAIResponsesSearchProvider, "search", xai_by_model)
+
+    result = await service.search("what is example")
+
+    assert result["ok"] is True
+    assert captured == ["primary-model", "fallback-model"]
+    assert result["content"] == "Fallback answer."
+    assert result["fallback_used"] is True
+    assert result["model"] == "fallback-model"
+    assert result["routing_decision"]["main_search_chain"] == ["xai-responses", "xai-responses"]
+    assert result["routing_decision"]["main_search_model_chain"] == [
+        {"provider": "xai-responses", "model": "primary-model", "model_role": "primary"},
+        {"provider": "xai-responses", "model": "fallback-model", "model_role": "fallback"},
+    ]
+    assert [a["provider"] for a in result["provider_attempts"][:2]] == ["xAI Responses", "xAI Responses"]
+    assert [a.get("model") for a in result["provider_attempts"][:2]] == ["primary-model", "fallback-model"]
+    assert result["provider_attempts"][0]["status"] == "error"
+    assert result["provider_attempts"][1]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_search_model_override_disables_xai_model_fallbacks(monkeypatch):
+    monkeypatch.setenv("XAI_API_KEY", "xai-test-secret")
+    monkeypatch.setenv("XAI_MODEL", "primary-model")
+    monkeypatch.setenv("XAI_MODEL_FALLBACKS", "fallback-model")
+    captured = []
+
+    async def fake_search(self, query, platform="", ctx=None):
+        captured.append(self.model)
+        return "Override answer."
+
+    monkeypatch.setattr(service.XAIResponsesSearchProvider, "search", fake_search)
+
+    result = await service.search("what is example", model="override-model")
+
+    assert result["ok"] is True
+    assert captured == ["override-model"]
+    assert result["model"] == "override-model"
+    assert result["routing_decision"]["main_search_chain"] == ["xai-responses"]
+    assert result["routing_decision"]["main_search_model_chain"] == [
+        {"provider": "xai-responses", "model": "override-model", "model_role": "primary"}
     ]
 
 

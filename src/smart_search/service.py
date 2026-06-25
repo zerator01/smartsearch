@@ -399,8 +399,9 @@ def _attempt(
     result_count: int = 0,
     error_type: str = "",
     error: str = "",
+    model: str = "",
 ) -> dict[str, Any]:
-    return {
+    attempt = {
         "capability": capability,
         "provider": provider,
         "status": status,
@@ -409,6 +410,9 @@ def _attempt(
         "elapsed_ms": _elapsed_ms(start),
         "result_count": result_count,
     }
+    if model:
+        attempt["model"] = model
+    return attempt
 
 
 def _normalize_source_results(results: list[dict] | None, provider: str) -> list[dict]:
@@ -1551,38 +1555,55 @@ def _configured_main_search_provider_ids() -> list[str]:
     return [provider for provider in MAIN_SEARCH_FALLBACK_CHAIN if provider in configured]
 
 
-def _main_search_provider_configs(model_override: str = "", providers: str = "auto") -> list[dict[str, Any]]:
+def _main_search_provider_configs(
+    model_override: str = "",
+    providers: str = "auto",
+    include_xai_model_fallbacks: bool = True,
+) -> list[dict[str, Any]]:
     provider_filter = _parse_provider_filter(providers)
-    by_provider: dict[str, dict[str, Any]] = {}
+    by_provider: dict[str, list[dict[str, Any]]] = {}
 
     if config.xai_api_key:
-        by_provider["xai-responses"] = {
-            "provider": "xai-responses",
-            "mode": "xai-responses",
-            "api_url": config.xai_api_url,
-            "api_key": config.xai_api_key,
-            "model": model_override or config.xai_model,
-            "tools": config.parse_xai_tools(config.xai_tools_raw),
-            "source": "XAI_*",
-        }
+        primary_model = model_override or config.xai_model
+        xai_models = [primary_model]
+        if include_xai_model_fallbacks and not model_override:
+            xai_models.extend(config.parse_xai_model_fallbacks(primary=primary_model))
+        xai_configs: list[dict[str, Any]] = []
+        for index, model in enumerate(xai_models):
+            xai_configs.append(
+                {
+                    "provider": "xai-responses",
+                    "mode": "xai-responses",
+                    "api_url": config.xai_api_url,
+                    "api_key": config.xai_api_key,
+                    "model": model,
+                    "model_role": "primary" if index == 0 else "fallback",
+                    "tools": config.parse_xai_tools(config.xai_tools_raw),
+                    "source": "XAI_*",
+                }
+            )
+        by_provider["xai-responses"] = xai_configs
 
     if config.openai_compatible_api_url and config.openai_compatible_api_key:
-        by_provider["openai-compatible"] = {
-            "provider": "openai-compatible",
-            "mode": "chat-completions",
-            "api_url": config.openai_compatible_api_url,
-            "api_key": config.openai_compatible_api_key,
-            "model": model_override or config.openai_compatible_model,
-            "stream": config.openai_compatible_stream,
-            "tools": [],
-            "source": "OPENAI_COMPATIBLE_*",
-        }
+        by_provider["openai-compatible"] = [
+            {
+                "provider": "openai-compatible",
+                "mode": "chat-completions",
+                "api_url": config.openai_compatible_api_url,
+                "api_key": config.openai_compatible_api_key,
+                "model": model_override or config.openai_compatible_model,
+                "model_role": "primary",
+                "stream": config.openai_compatible_stream,
+                "tools": [],
+                "source": "OPENAI_COMPATIBLE_*",
+            }
+        ]
 
-    return [
-        by_provider[provider]
-        for provider in MAIN_SEARCH_FALLBACK_CHAIN
-        if provider in by_provider and _provider_allowed(provider, provider_filter)
-    ]
+    provider_configs: list[dict[str, Any]] = []
+    for provider in MAIN_SEARCH_FALLBACK_CHAIN:
+        if provider in by_provider and _provider_allowed(provider, provider_filter):
+            provider_configs.extend(by_provider[provider])
+    return provider_configs
 
 
 def _main_search_providers(provider_configs: list[dict[str, Any]], fallback: str) -> list[Any]:
@@ -2145,6 +2166,14 @@ async def search(
         "fallback_mode": fallback_mode,
         "providers": providers,
         "main_search_chain": [item["provider"] for item in selected_main_provider_configs],
+        "main_search_model_chain": [
+            {
+                "provider": item["provider"],
+                "model": item.get("model", ""),
+                "model_role": item.get("model_role", "primary"),
+            }
+            for item in selected_main_provider_configs
+        ],
         "openai_compatible_stream": next((bool(item.get("stream")) for item in selected_main_provider_configs if item["provider"] == "openai-compatible"), False),
     }
 
@@ -2161,7 +2190,16 @@ async def search(
             if candidate_result:
                 primary_result = candidate_result
                 successful_main_config = provider_config
-                provider_attempts.append(_attempt("main_search", search_provider.get_provider_name(), "ok", primary_start, result_count=1))
+                provider_attempts.append(
+                    _attempt(
+                        "main_search",
+                        search_provider.get_provider_name(),
+                        "ok",
+                        primary_start,
+                        result_count=1,
+                        model=provider_config.get("model", ""),
+                    )
+                )
                 break
             last_primary_error = _primary_search_error_result(
                 start,
@@ -2171,7 +2209,15 @@ async def search(
                 "network_error",
                 f"{search_provider.get_provider_name()} 返回空结果",
             )
-            provider_attempts.append(_attempt("main_search", search_provider.get_provider_name(), "empty", primary_start))
+            provider_attempts.append(
+                _attempt(
+                    "main_search",
+                    search_provider.get_provider_name(),
+                    "empty",
+                    primary_start,
+                    model=provider_config.get("model", ""),
+                )
+            )
         except Exception as e:
             error_result = _primary_search_exception_result(start, session_id, query, provider_config["mode"], search_provider.get_provider_name(), e)
             last_primary_error = error_result
@@ -2183,6 +2229,7 @@ async def search(
                     primary_start,
                     error_type=error_result["error_type"],
                     error=error_result["error"],
+                    model=provider_config.get("model", ""),
                 )
             )
     if primary_result is None:
@@ -3627,7 +3674,7 @@ async def doctor() -> dict[str, Any]:
 
     main_provider_configs: list[dict[str, Any]] = []
     try:
-        main_provider_configs = _main_search_provider_configs()
+        main_provider_configs = _main_search_provider_configs(include_xai_model_fallbacks=False)
         info["main_search_connection_tests"] = {}
         for provider_config in main_provider_configs:
             info["main_search_connection_tests"][provider_config["provider"]] = await _safe_test_main_provider_connection(provider_config)

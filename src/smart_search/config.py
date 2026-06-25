@@ -28,6 +28,7 @@ class Config:
         "XAI_API_URL",
         "XAI_API_KEY",
         "XAI_MODEL",
+        "XAI_MODEL_FALLBACKS",
         "XAI_TOOLS",
         "OPENAI_COMPATIBLE_API_URL",
         "OPENAI_COMPATIBLE_API_KEY",
@@ -248,6 +249,7 @@ class Config:
             "XAI_API_URL",
             "XAI_API_KEY",
             "XAI_MODEL",
+            "XAI_MODEL_FALLBACKS",
             "XAI_TOOLS",
             "OPENAI_COMPATIBLE_API_URL",
             "OPENAI_COMPATIBLE_API_KEY",
@@ -274,6 +276,7 @@ class Config:
             "XAI_API_URL",
             "XAI_API_KEY",
             "XAI_MODEL",
+            "XAI_MODEL_FALLBACKS",
             "XAI_TOOLS",
             "OPENAI_COMPATIBLE_API_URL",
             "OPENAI_COMPATIBLE_API_KEY",
@@ -329,6 +332,10 @@ class Config:
         return self._get_config_value("XAI_MODEL") or self._base_model_value()
 
     @property
+    def xai_model_fallbacks_raw(self) -> str:
+        return self._get_config_value("XAI_MODEL_FALLBACKS", "") or ""
+
+    @property
     def xai_tools_raw(self) -> str:
         return self._get_config_value("XAI_TOOLS", self._DEFAULT_XAI_TOOLS) or self._DEFAULT_XAI_TOOLS
 
@@ -369,6 +376,19 @@ class Config:
             invalid_text = ", ".join(invalid)
             raise ValueError(f"Invalid XAI_TOOLS: {invalid_text}. Supported values: {allowed}")
         return tools
+
+    def parse_xai_model_fallbacks(self, raw: str | None = None, primary: str | None = None) -> list[str]:
+        raw = self.xai_model_fallbacks_raw if raw is None else raw
+        primary_model = (primary or self.xai_model or "").strip()
+        fallbacks: list[str] = []
+        seen: set[str] = {primary_model} if primary_model else set()
+        for item in raw.split(","):
+            model = item.strip()
+            if not model or model in seen:
+                continue
+            seen.add(model)
+            fallbacks.append(model)
+        return fallbacks
 
     def _validated_enum(self, key: str, default: str, allowed: set[str]) -> str:
         value = (self._get_config_value(key, default) or default).strip().lower()
@@ -780,6 +800,7 @@ class Config:
             "XAI_API_URL": self.xai_api_url,
             "XAI_API_KEY": self._mask_api_key(self.xai_api_key) if self.xai_api_key else "未配置",
             "XAI_MODEL": self.xai_model,
+            "XAI_MODEL_FALLBACKS": self.xai_model_fallbacks_raw,
             "XAI_TOOLS": self.xai_tools_raw,
             "OPENAI_COMPATIBLE_API_URL": self.openai_compatible_api_url or "未配置",
             "OPENAI_COMPATIBLE_API_KEY": self._mask_api_key(self.openai_compatible_api_key) if self.openai_compatible_api_key else "未配置",
