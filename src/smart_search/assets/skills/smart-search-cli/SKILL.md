@@ -1,51 +1,83 @@
 ---
 name: smart-search-cli
-description: "CLI-first web research and source retrieval through the local smart-search command. Use when Codex needs current web search, source-backed fact checking, URL fetching, site mapping, official/API/documentation search, deep research, or reproducible search evidence via Skill + CLI instead of MCP tools or native web search."
+description: "CLI-first web research through the local smart-search command. Use when an AI agent needs current web search, source-backed fact checking, URL/page fetching, official/API/docs search, site mapping, Deep Research planning, or live research with reproducible commands and evidence. Prefer this managed CLI over native web search when smart-search is available."
 ---
 
 # Smart Search CLI
 
-Use the local `smart-search` command as the default execution layer for web research. This entrypoint keeps only routing, boundaries, and reference selection; load the focused reference file when command details or provider contracts matter.
+Use the local `smart-search` command as the controlled web-research layer. This file is the operator protocol; load the focused reference files only when exact flags, provider contracts, setup details, or release checks matter.
 
-## Default Workflow
+## Operating Contract
 
-1. Run `smart-search doctor --format json` when configuration or availability is uncertain.
-2. If `doctor` reports missing configuration, use `smart-search setup` or `smart-search config set KEY VALUE` when the user provides keys. Do not ask users to edit global environment variables by default.
-3. If OpenAI-compatible `search` hangs or times out after `doctor` succeeds, run `smart-search diagnose openai-compatible --format markdown` and use its summary.
-4. If `doctor` returns `ok: true`, use only `smart-search` CLI subcommands for web research. Do not call Codex native web search in the same task.
-5. Use `smart-search skills status --targets codex --format json` when the installed global skill may be stale; use `smart-search skills update --targets codex --format json` to refresh it without rerunning setup.
-6. Use `smart-search smoke --mock --format json` after CLI/provider architecture changes. Use `--live` only when real keys are available and the user expects live checks.
-7. Use `smart-search route "query" --format markdown` when you need to explain intent routing without executing providers.
-8. Use `smart-search search` as the first hop for realtime, broad exploration, community signals, multi-source summaries, and routing metadata.
-9. Treat Exa as a paid precision tool, not the default second hop after Grok/main search. Use `smart-search exa-search` only for explicit docs/API/papers/standards, known-domain/site: searches, user-requested Exa/low-noise discovery, or when main search fails to produce enough candidate URLs.
-10. For supplier/directory/procurement expansion, default to Grok/main `search` for candidate discovery, then `fetch` or Camofox for page evidence. Do not add Exa just to de-noise official/contact/portfolio URLs unless the user explicitly asks for Exa or the Grok result is insufficient.
-11. Preserve command lines and source URLs in your answer. Prefer citing fetched pages or `primary_sources`; treat `extra_sources` as follow-up candidates until fetched.
+- Prefer the cheapest command that can answer the user safely.
+- Discover sources before broad synthesis; fetch key pages before making claim-level statements.
+- Preserve important command lines, output paths, and source URLs in the final answer or work log.
+- Treat `primary_sources` and `extra_sources` as discovery candidates until the relevant URL has been fetched or read by `research`.
+- Use same-capability fallback only. Do not replace web search with docs search, docs search with page fetch, or main synthesis with browser extraction.
+- Do not expose API keys. Use `setup` or `config set` for configuration and rely on masked diagnostics.
 
-## Routing
+## When To Use
 
-- `search`: first hop for realtime, broad exploration, community signals, multi-source summaries, and routing metadata.
-- `route`: explain capability routing without executing providers.
-- `research`: live Deep Research executor for end-to-end plan, discovery, fetch/read, gap check, and evidence-only synthesis.
-- `deep`: offline Deep Research planner; it does not run providers, fetch pages, or replace default `search`.
-- `zhipu-search`: Chinese-language, domestic China, policy/regulatory, announcements, current news, or China-local source discovery.
-- `context7-library` / `context7-docs`: library, SDK, API, framework, or documentation intent. Prefer Context7 before Exa for docs/API questions.
-- `exa-search`: explicit docs/API/papers/standards, known-domain/site: searches, requested low-noise discovery, and adjacent source discovery through `exa-similar`.
-- `fetch`: user-provided URLs or any claim that depends on page content; Camofox is the browser evidence fallback for selected, dynamic, blocked, or API-fetch-failed pages.
-- `map`: documentation site or domain structure before fetching many pages from one site.
-- `anysearch-*`: explicit experimental vertical search only. Inspect domains first and do not use AnySearch as default fallback.
-- `model current`: inspect explicit provider models only. Change models with `smart-search config set XAI_MODEL ...` or `smart-search config set OPENAI_COMPATIBLE_MODEL ...`.
+Use this skill for live/current facts, source discovery, source-backed verification, user-provided URLs, official docs/API/library research, site/documentation mapping, supplier/directory/procurement expansion, serious comparisons, or any user request for deep search/research.
+
+Do not use it for pure rewriting, private-file analysis, local code reasoning with no live facts, or tasks where the user explicitly requested no web access.
+
+## Fast Decision Table
+
+| User intent | First command | Evidence rule |
+| --- | --- | --- |
+| Quick current/broad question | `smart-search search "query" --validation balanced --extra-sources 2 --format json` | Use the answer for orientation; fetch key URLs for high-risk claims. |
+| User gives exact URL/PDF/page | `smart-search fetch "URL" --format markdown --output page.md` | Page text can support claims; fetch more sources when comparison is needed. |
+| Official docs/API/library/framework | `context7-library` -> `context7-docs`; use `exa-search` only for explicit docs/API/papers/standards or known-domain precision | Prefer official/docs sources; fetch or docs output before final claims. |
+| Chinese, domestic, current, policy, or announcements | `smart-search zhipu-search "query" --count 5 --format json` | Fetch selected official or primary pages when claims matter. |
+| Serious comparison, review, claim check, or `深度搜索/调研` | `smart-search research "question" --budget standard --fallback auto --format json` | Final synthesis must cite fetched/read evidence or list gaps. |
+| Plan only / offline decomposition | `smart-search deep "question" --budget standard --format json` | Execute planned steps before answering claims. |
+| Many pages from one site/docs | `smart-search map "https://site" --max-depth 1 --max-breadth 20 --limit 50 --format json`, then `fetch` selected pages | `map` is structure, not claim proof. |
+| Experimental vertical domain | `smart-search anysearch-domains DOMAIN --format json`, then selected `anysearch-search` | Treat as acceptance/boundary evidence until reviewed. |
+| Explain routing without provider calls | `smart-search route "query" --format markdown` | Diagnostic only; not evidence. |
+
+## Standard Workflow
+
+1. Preflight only when needed: run `smart-search doctor --format json` when configuration, PATH, provider availability, or first-use state is uncertain. Do not run `doctor` before every ordinary query.
+2. Classify the request using the table above. When unsure, run `smart-search route "query" --format markdown`.
+3. Run the smallest matching command. Prefer JSON for agent parsing; use Markdown/content output for fetched pages intended for reading.
+4. Save reusable evidence with `--output` for multi-source work, long pages, or claims that may need citation.
+5. For high-risk/current/news/policy/finance/health/legal or purchasing decisions: fetch the 1-3 most important URLs before final claims.
+6. Answer with the evidence mode clear: fetched/read evidence, discovery-only candidates, unsupported gaps, and key commands used when useful.
+
+## Deep Research Workflow
+
+- Use `research` when the user wants the CLI to execute live Deep Research end to end.
+- Use `deep` when the user wants an offline plan or when provider calls should not run yet.
+- Deep Research is capability-based, not a fixed topic recipe system.
+- `deep` does not run providers, `doctor`, or fetch pages by default.
+- Preserve `steps[].command`, `steps[].output_path`, and `evidence_dir`; do not rewrite planned output contracts.
+- Keep `fetch_before_claim`: if a key claim lacks fetched/read evidence, fetch another source or mark the claim as unverified.
+
+## Fallback And Failure Handling
+
+- If `search` times out, follow `references/command-patterns.md` timeout retry policy: retry the CLI command with `--timeout 180`, `--extra-sources 1`, JSON output, and saved output files. Do not use shell-level `timeout`.
+- If a provider fails, stay within the same capability and report `provider_attempts`, `fallback_used`, and degraded gaps when relevant.
+- If a configured CLI capability is missing, report the missing capability and use `smart-search setup` or `smart-search config set KEY VALUE` when the user provides keys. Do not silently call native web search.
+- If OpenAI-compatible search hangs or times out after `doctor` succeeds, run `smart-search diagnose openai-compatible --format markdown`.
+- Camofox is a browser evidence fallback for selected URLs, dynamic/blocked pages, or API-fetch failures. It is not a web-search or docs-search provider.
+
+## Skill Maintenance
+
+- If the installed global skill may be stale, run `smart-search skills status --targets codex --format json`; replace `codex` with `claude`, `cursor`, or `hermes` for the active tool. Refresh with `smart-search skills update --targets codex --format json`.
+- After CLI/provider architecture changes, run `smart-search smoke --mock --format json`. Use `--live` only with real keys and explicit live-check expectations.
+- Keep this entrypoint concise. Put long command catalogs, provider details, and release lessons in the reference files.
 
 ## Key Boundaries
 
-- `smart-search` should resolve from the user's PATH.
-- Private API keys should be saved with `smart-search setup` or `smart-search config set`; environment variables remain supported for CI and advanced users.
+- `smart-search` must resolve from the user's PATH.
+- Config belongs in `smart-search setup` or `smart-search config set`; environment variables are for CI/advanced users.
 - In sandboxed runtimes, set `SMART_SEARCH_CONFIG_DIR` to an absolute writable path when the default config directory is unavailable or must be pinned.
-- The standard minimum profile requires one configured provider in each of `main_search`, `docs_search`, and fetch capability. Missing required capabilities are hard configuration failures.
-- Fallback must remain same-capability only. Do not use Context7 for broad news/web facts or page-extraction providers as documentation search replacements.
-- xAI Responses and OpenAI-compatible are peer `main_search` providers. Do not reuse one provider's URL/key to fabricate the other provider as fallback.
-- Camofox Browser is a browser evidence layer, not a `web_search`, `docs_search`, or main synthesis provider. Use source discovery -> Camofox page verification -> optional Stagehand extraction when quota or rendered-page constraints require it.
-- For current-news, policy, finance, health, and other high-risk facts, do not answer from broad `search.content` alone. Fetch key pages and summarize only what fetched text supports.
-- Native `web_search` is disabled in this CLI-first workflow unless the user explicitly configures another approved route; do not silently fall back to another web-search route.
+- The standard minimum profile requires configured capabilities for `main_search`, `docs_search`, and `web_fetch`; missing required capabilities are hard configuration failures.
+- xAI Responses and OpenAI-compatible are peer `main_search` providers. Do not reuse one provider's URL/key to fabricate another provider fallback.
+- Exa is a paid precision tool, not the default second hop after main/Grok search.
+- AnySearch is explicit experimental vertical search only, not general fallback.
+- Native web search is disabled in this CLI-first workflow unless the user explicitly configures another approved route.
 
 ## References
 
