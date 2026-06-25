@@ -56,7 +56,11 @@ Do not use it for pure rewriting, private-file analysis, local code reasoning wi
 
 ## Fallback And Failure Handling
 
-- If `search` times out, follow `references/command-patterns.md` timeout retry policy: retry the CLI command with `--timeout 180`, `--extra-sources 1`, JSON output, and saved output files. Do not use shell-level `timeout`.
+- Timeout Retry Policy: when `search` returns `ok: false` with `error_type: "network_error"` and a timeout message, treat it as retryable CLI-level timeout handling.
+- Retry up to 3 total attempts with `--timeout 180`; use `--extra-sources 1` during retry attempts, JSON output, and saved output files.
+- Always use the CLI's `--timeout` option. Do not wrap `smart-search` in a shell-level `timeout` command.
+- Do not rely on `SMART_SEARCH_RETRY_*` settings for this workflow.
+- If all retry attempts fail, fall back to source-first evidence: Run `exa-search` with the original query, use domain/intent-specific source discovery when cheaper, `fetch` the top 1-2 relevant URLs, and mark the final evidence mode as `source_mode: "fallback"` or equivalent prose.
 - If a provider fails, stay within the same capability and report `provider_attempts`, `fallback_used`, and degraded gaps when relevant.
 - If a configured CLI capability is missing, report the missing capability and use `smart-search setup` or `smart-search config set KEY VALUE` when the user provides keys. Do not silently call native web search.
 - If OpenAI-compatible search hangs or times out after `doctor` succeeds, run `smart-search diagnose openai-compatible --format markdown`.
