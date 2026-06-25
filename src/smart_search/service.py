@@ -3275,7 +3275,16 @@ async def _probe_openai_compatible_search_shape(
                     json=payload,
                 ) as response:
                     content_type = response.headers.get("content-type", "")
-                    response.raise_for_status()
+                    if response.status_code >= 400:
+                        return _diagnose_check_result(
+                            name=name,
+                            status="warning",
+                            message=f"HTTP {response.status_code}: {response.reason_phrase}",
+                            start=start,
+                            http_status=response.status_code,
+                            content_type=content_type,
+                            stream=stream,
+                        )
                     has_content = False
                     async for line in response.aiter_lines():
                         stripped = line.strip()

@@ -1983,6 +1983,48 @@ async def test_diagnose_openai_compatible_reports_ok_when_both_search_shapes_wor
 
 
 @pytest.mark.asyncio
+async def test_openai_compatible_stream_probe_reports_http_error_without_reading_body(monkeypatch):
+    class StreamErrorResponse:
+        status_code = 502
+        reason_phrase = "Bad Gateway"
+        headers = {"content-type": "text/plain"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, *args, **kwargs):
+            return StreamErrorResponse()
+
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeClient)
+
+    result = await service._probe_openai_compatible_search_shape(
+        "https://relay.example.com/v1",
+        "relay-test-secret",
+        "test-model",
+        stream=True,
+        timeout_seconds=3,
+    )
+
+    assert result["status"] == "warning"
+    assert result["http_status"] == 502
+    assert result["stream"] is True
+    assert "Bad Gateway" in result["message"]
+
+
+@pytest.mark.asyncio
 async def test_doctor_reports_invalid_validation_config(monkeypatch):
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://api.example.com/v1")
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-test-secret")
