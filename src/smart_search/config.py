@@ -12,6 +12,7 @@ class Config:
     )
     _DEFAULT_MODEL = "grok-4-fast"
     _DEFAULT_XAI_TOOLS = "web_search,x_search"
+    _DEFAULT_OPENAI_COMPATIBLE_TOOLS = ""
     _DEFAULT_VALIDATION_LEVEL = "balanced"
     _DEFAULT_FALLBACK_MODE = "auto"
     _DEFAULT_MINIMUM_PROFILE = "standard"
@@ -34,6 +35,7 @@ class Config:
         "OPENAI_COMPATIBLE_API_KEY",
         "OPENAI_COMPATIBLE_MODEL",
         "OPENAI_COMPATIBLE_STREAM",
+        "OPENAI_COMPATIBLE_TOOLS",
         "SMART_SEARCH_VALIDATION_LEVEL",
         "SMART_SEARCH_FALLBACK_MODE",
         "SMART_SEARCH_MINIMUM_PROFILE",
@@ -255,6 +257,7 @@ class Config:
             "OPENAI_COMPATIBLE_API_KEY",
             "OPENAI_COMPATIBLE_MODEL",
             "OPENAI_COMPATIBLE_STREAM",
+            "OPENAI_COMPATIBLE_TOOLS",
             "SMART_SEARCH_VALIDATION_LEVEL",
             "SMART_SEARCH_FALLBACK_MODE",
             "SMART_SEARCH_MINIMUM_PROFILE",
@@ -282,6 +285,7 @@ class Config:
             "OPENAI_COMPATIBLE_API_KEY",
             "OPENAI_COMPATIBLE_MODEL",
             "OPENAI_COMPATIBLE_STREAM",
+            "OPENAI_COMPATIBLE_TOOLS",
             "SMART_SEARCH_VALIDATION_LEVEL",
             "SMART_SEARCH_FALLBACK_MODE",
             "SMART_SEARCH_MINIMUM_PROFILE",
@@ -356,8 +360,20 @@ class Config:
     def openai_compatible_stream(self) -> bool:
         return (self._get_config_value("OPENAI_COMPATIBLE_STREAM", "false") or "false").lower() in ("true", "1", "yes")
 
+    @property
+    def openai_compatible_tools_raw(self) -> str:
+        return self._get_config_value("OPENAI_COMPATIBLE_TOOLS", self._DEFAULT_OPENAI_COMPATIBLE_TOOLS) or self._DEFAULT_OPENAI_COMPATIBLE_TOOLS
+
     def parse_xai_tools(self, raw: str | None = None) -> list[str]:
         raw = raw or self.xai_tools_raw
+        return self._parse_search_tools(raw, key="XAI_TOOLS")
+
+    def parse_openai_compatible_tools(self, raw: str | None = None) -> list[str]:
+        raw = self.openai_compatible_tools_raw if raw is None else raw
+        return self._parse_search_tools(raw, key="OPENAI_COMPATIBLE_TOOLS")
+
+    def _parse_search_tools(self, raw: str | None, key: str) -> list[str]:
+        raw = raw or ""
         tools: list[str] = []
         invalid: list[str] = []
         seen: set[str] = set()
@@ -374,7 +390,7 @@ class Config:
         if invalid:
             allowed = ", ".join(sorted(self._ALLOWED_XAI_TOOLS))
             invalid_text = ", ".join(invalid)
-            raise ValueError(f"Invalid XAI_TOOLS: {invalid_text}. Supported values: {allowed}")
+            raise ValueError(f"Invalid {key}: {invalid_text}. Supported values: {allowed}")
         return tools
 
     def parse_xai_model_fallbacks(self, raw: str | None = None, primary: str | None = None) -> list[str]:
@@ -806,6 +822,7 @@ class Config:
             "OPENAI_COMPATIBLE_API_KEY": self._mask_api_key(self.openai_compatible_api_key) if self.openai_compatible_api_key else "未配置",
             "OPENAI_COMPATIBLE_MODEL": self.openai_compatible_model,
             "OPENAI_COMPATIBLE_STREAM": self.openai_compatible_stream,
+            "OPENAI_COMPATIBLE_TOOLS": self.openai_compatible_tools_raw,
             "SMART_SEARCH_VALIDATION_LEVEL": validation_level,
             "SMART_SEARCH_FALLBACK_MODE": fallback_mode,
             "SMART_SEARCH_MINIMUM_PROFILE": minimum_profile,

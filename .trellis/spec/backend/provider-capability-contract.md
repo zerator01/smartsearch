@@ -223,6 +223,11 @@ Provider configuration:
 - `OPENAI_COMPATIBLE_STREAM` is an opt-in relay compatibility switch. It
   defaults to `false`, accepts `true`, `1`, or `yes`, and may be overridden for
   one `search` call with `--stream` or `--no-stream`.
+- `OPENAI_COMPATIBLE_TOOLS` is an opt-in server-tool list for compatible
+  relays that support xAI-style Chat Completions tools. It defaults to empty
+  and may contain only `web_search` and `x_search`. It must not send
+  `web_search_preview` or legacy `search_parameters`, and it must not trigger
+  automatic page fetching.
 - Official xAI calls use the Responses API `/responses` route through `XAI_*`.
 - Compatible relays/gateways use Chat Completions `/chat/completions` through
   `OPENAI_COMPATIBLE_*`.
@@ -484,6 +489,9 @@ Output contracts:
   `degraded`, `route_policy_version`, and `evidence_dir`.
 - `search` must expose the effective OpenAI-compatible stream decision in
   `routing_decision.openai_compatible_stream` when that provider is attempted.
+- `search` must expose the effective OpenAI-compatible server-tool list in
+  `routing_decision.openai_compatible_tools` when provider configs are
+  evaluated.
 - AnySearch command output must include `provider="anysearch"`, `tool`,
   `content`/`raw_content` when available, `results`, and `elapsed_ms` on
   success. Failures must include stable `ok=false`, `error_type`, `error`,

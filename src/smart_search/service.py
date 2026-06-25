@@ -1594,7 +1594,7 @@ def _main_search_provider_configs(
                 "model": model_override or config.openai_compatible_model,
                 "model_role": "primary",
                 "stream": config.openai_compatible_stream,
-                "tools": [],
+                "tools": config.parse_openai_compatible_tools(),
                 "source": "OPENAI_COMPATIBLE_*",
             }
         ]
@@ -1626,6 +1626,7 @@ def _main_search_providers(provider_configs: list[dict[str, Any]], fallback: str
                     provider_config["api_key"],
                     provider_config["model"],
                     provider_config.get("stream", False),
+                    provider_config.get("tools", []),
                 )
             )
     return providers
@@ -2175,6 +2176,7 @@ async def search(
             for item in selected_main_provider_configs
         ],
         "openai_compatible_stream": next((bool(item.get("stream")) for item in selected_main_provider_configs if item["provider"] == "openai-compatible"), False),
+        "openai_compatible_tools": next((item.get("tools", []) for item in selected_main_provider_configs if item["provider"] == "openai-compatible"), []),
     }
 
     provider_attempts: list[dict] = []

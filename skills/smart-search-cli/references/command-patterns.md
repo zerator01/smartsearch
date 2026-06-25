@@ -65,6 +65,7 @@ smart-search config set OPENAI_COMPATIBLE_API_URL "https://api.openai.com/v1" --
 smart-search config set OPENAI_COMPATIBLE_API_KEY "key" --format json
 smart-search config set OPENAI_COMPATIBLE_MODEL "model-id" --format json
 smart-search config set OPENAI_COMPATIBLE_STREAM "true" --format json
+smart-search config set OPENAI_COMPATIBLE_TOOLS "web_search" --format json
 smart-search config set ANYSEARCH_API_URL "https://api.anysearch.com/mcp" --format json
 smart-search config set ANYSEARCH_API_KEY "key" --format json
 smart-search config set ANYSEARCH_TIMEOUT_SECONDS "30" --format json
