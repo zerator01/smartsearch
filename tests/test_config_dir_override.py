@@ -123,6 +123,29 @@ def test_tavily_timeout_defaults_to_thirty_seconds(monkeypatch):
     assert info["config_sources"]["TAVILY_TIMEOUT_SECONDS"] == "default"
 
 
+def test_openai_compatible_tools_default_empty(monkeypatch, tmp_path):
+    monkeypatch.setenv("SMART_SEARCH_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.delenv("OPENAI_COMPATIBLE_TOOLS", raising=False)
+    config = _fresh_config_file(monkeypatch)
+    assert config.openai_compatible_tools_raw == ""
+    assert config.parse_openai_compatible_tools() == []
+
+
+def test_openai_compatible_tools_can_enable_xai_search_tools(monkeypatch, tmp_path):
+    monkeypatch.setenv("SMART_SEARCH_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("OPENAI_COMPATIBLE_TOOLS", "web_search, x_search, web_search")
+    config = _fresh_config_file(monkeypatch)
+    assert config.parse_openai_compatible_tools() == ["web_search", "x_search"]
+
+
+def test_openai_compatible_tools_rejects_unknown_values(monkeypatch, tmp_path):
+    monkeypatch.setenv("SMART_SEARCH_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("OPENAI_COMPATIBLE_TOOLS", "web_search,web_search_preview")
+    config = _fresh_config_file(monkeypatch)
+    with pytest.raises(ValueError, match="Invalid OPENAI_COMPATIBLE_TOOLS"):
+        config.parse_openai_compatible_tools()
+
+
 def test_tavily_timeout_can_be_configured(monkeypatch):
     monkeypatch.setenv("TAVILY_TIMEOUT_SECONDS", "45")
     config = _fresh_config_file(monkeypatch)

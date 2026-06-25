@@ -41,6 +41,29 @@ async def test_search_uses_non_stream_completion_and_headers(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_can_send_configured_builtin_tools(monkeypatch):
+    provider = OpenAICompatibleSearchProvider(
+        "https://api.example.com",
+        "test-key",
+        "test-model",
+        tools=["web_search", "x_search"],
+    )
+    captured = {}
+
+    async def fake_execute(headers, payload, ctx):
+        captured["payload"] = payload
+        return "answer [[1]](https://example.com/source)"
+
+    monkeypatch.setattr(provider, "_execute_completion_with_retry", fake_execute)
+
+    result = await provider.search("latest news")
+
+    assert result.startswith("answer")
+    assert captured["payload"]["tools"] == [{"type": "web_search"}, {"type": "x_search"}]
+    assert "search_parameters" not in captured["payload"]
+
+
+@pytest.mark.asyncio
 async def test_fetch_uses_non_stream(monkeypatch):
     """验证 fetch() 使用非流式 completion"""
     provider = OpenAICompatibleSearchProvider("https://api.example.com", "test-key", "test-model")

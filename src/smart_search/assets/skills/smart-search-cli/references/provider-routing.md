@@ -48,7 +48,7 @@ Intent router rules:
 - `OPENAI_COMPATIBLE_STREAM=true` or `search --stream` sets `stream=true` only for OpenAI-compatible `search` and provider-side `fetch`; it is a relay compatibility switch and does not affect xAI Responses, URL description, or source ranking.
 - Legacy `SMART_SEARCH_API_URL`, `SMART_SEARCH_API_KEY`, `SMART_SEARCH_API_MODE`, `SMART_SEARCH_MODEL`, and `SMART_SEARCH_XAI_TOOLS` are unsupported config keys.
 - xAI Responses mode may use only `XAI_TOOLS=web_search,x_search` and a subset of those tools.
-- Chat Completions mode must not send xAI `web_search` / `x_search` tools or legacy `search_parameters`; xAI Chat Completions Live Search is deprecated.
+- OpenAI-compatible Chat Completions defaults to no server-side tools. Set `OPENAI_COMPATIBLE_TOOLS=web_search` or `web_search,x_search` only for compatible relays that support those tools. Do not use `web_search_preview` or legacy `search_parameters`. These tools do not fetch result pages automatically; use `fetch` when page text is required.
 - The standard minimum profile requires one configured provider in each of `main_search`, `docs_search`, and fetch capability. Missing required capabilities should be treated as a hard configuration failure.
 - AnySearch is reported only as optional experimental `vertical_search`; it is not part of general web discovery and is not required by the `standard` minimum profile.
 - Jina Reader is `web_fetch` only, not a general search provider. `JINA_API_KEY` is required before Jina satisfies the standard minimum profile; anonymous `r.jina.ai` is explicit/experimental fetch behavior.
@@ -127,6 +127,7 @@ OpenAI-compatible streaming:
 - `OPENAI_COMPATIBLE_STREAM` defaults to `false` and accepts `true`, `1`, or `yes` as true.
 - `search --stream` and `search --no-stream` override `OPENAI_COMPATIBLE_STREAM` for the current invocation.
 - Streaming applies only to OpenAI-compatible `search()` and provider-side `fetch()` calls. `describe_url()` and `rank_sources()` stay non-streaming. xAI Responses behavior is unchanged.
+- `OPENAI_COMPATIBLE_TOOLS` defaults to empty and accepts only `web_search` and `x_search`; configured tools are sent only on OpenAI-compatible `search()`.
 
 Exa domain filters:
 

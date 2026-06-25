@@ -69,6 +69,7 @@
 - Use `smart-search setup --non-interactive --camofox-mcp-url "http://127.0.0.1:19388/mcp" --camofox-auth-token "key"` or `--camofox-token-command` / `--camofox-tunnel-script` when Camofox should satisfy or reinforce `web_fetch`.
 - Use `smart-search setup --non-interactive --zhipu-mcp-key "key"` only when the user explicitly wants Coding Plan Remote MCP quota.
 - Use `smart-search setup --non-interactive --openai-compatible-stream true` only when an OpenAI-compatible relay benefits from SSE streaming for long requests. Default remains false.
+- Use `smart-search config set OPENAI_COMPATIBLE_TOOLS web_search --format json` or `smart-search setup --advanced` only when an OpenAI-compatible relay supports server-side `web_search` / `x_search`. Default remains empty.
 - Use `smart-search setup --non-interactive --anysearch-api-url "https://api.anysearch.com/mcp" --anysearch-key "key"` only for experimental AnySearch acceptance; do not add it to the normal minimum-profile setup.
 - `TAVILY_API_URL` defaults to `https://api.tavily.com` and only affects Tavily REST calls. It does not proxy Zhipu.
 - Use `TAVILY_API_URL=https://<host>/api/tavily` for Tavily Hikari / pooled endpoints. Root host and `/mcp` inputs are normalized by setup; `/mcp` itself is not the REST base Smart Search should call.

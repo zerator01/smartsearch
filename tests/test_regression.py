@@ -416,6 +416,7 @@ def test_streaming_and_anysearch_contract_public_and_packaged_assets_match():
 
     required_markers = [
         "OPENAI_COMPATIBLE_STREAM",
+        "OPENAI_COMPATIBLE_TOOLS",
         "--stream",
         "--no-stream",
         "ANYSEARCH_API_URL",
@@ -438,6 +439,7 @@ def test_streaming_and_anysearch_contract_public_and_packaged_assets_match():
 
     zh_required_markers = [
         "OPENAI_COMPATIBLE_STREAM",
+        "OPENAI_COMPATIBLE_TOOLS",
         "ANYSEARCH_API_URL",
         "ANYSEARCH_API_KEY",
         "ANYSEARCH_TIMEOUT_SECONDS",

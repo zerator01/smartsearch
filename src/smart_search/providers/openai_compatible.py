@@ -81,10 +81,18 @@ class _WaitWithRetryAfter(wait_base):
 
 
 class OpenAICompatibleSearchProvider(BaseSearchProvider):
-    def __init__(self, api_url: str, api_key: str, model: str = "grok-4-fast", stream: bool = False):
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        model: str = "grok-4-fast",
+        stream: bool = False,
+        tools: list[str] | None = None,
+    ):
         super().__init__(api_url, api_key)
         self.model = model
         self.stream = stream
+        self.tools = tools or []
 
     def get_provider_name(self) -> str:
         return "OpenAI-compatible"
@@ -125,6 +133,8 @@ class OpenAICompatibleSearchProvider(BaseSearchProvider):
             ],
             "stream": self.stream,
         }
+        if self.tools:
+            payload["tools"] = [{"type": tool} for tool in self.tools]
 
         await log_info(ctx, f"platform_prompt: { query + platform_prompt}", config.debug_enabled)
 
