@@ -420,12 +420,35 @@ def _format_doctor_markdown(data: dict[str, Any]) -> str:
                         capability,
                         _status_label(status.get("ok")),
                         _configured_text(status.get("configured")),
-                        _configured_text(status.get("fallback_chain")),
+                        status.get("scenario_role", ""),
                     ]
                 )
         if rows:
             lines.extend(["", "## Capabilities"])
-            lines.extend(_markdown_table(["Capability", "Status", "Configured", "Fallback chain"], rows))
+            lines.extend(_markdown_table(["Capability", "Status", "Configured", "Scenario role"], rows))
+
+    scenario_fallbacks = data.get("scenario_fallbacks") or {}
+    scenarios = scenario_fallbacks.get("scenarios") if isinstance(scenario_fallbacks, dict) else {}
+    if isinstance(scenarios, dict) and scenarios:
+        lines.extend(["", "## Scenario Fallbacks"])
+        if scenario_fallbacks.get("principle"):
+            lines.append(str(scenario_fallbacks["principle"]))
+        rows = []
+        for scenario, details in scenarios.items():
+            if not isinstance(details, dict):
+                continue
+            layers = []
+            for layer in details.get("layers") or []:
+                if not isinstance(layer, dict):
+                    continue
+                status = layer.get("status", "")
+                suffix = f" ({status})" if status else ""
+                layers.append(f"{layer.get('step', '')}: {layer.get('role', '')}{suffix}")
+            rows.append([scenario, details.get("role", ""), " -> ".join(layers)])
+        if rows:
+            lines.extend(_markdown_table(["Scenario", "Role", "Layers"], rows))
+        if scenario_fallbacks.get("boundary"):
+            lines.append(str(scenario_fallbacks["boundary"]))
 
     main_tests = data.get("main_search_connection_tests") or {}
     if main_tests:
@@ -449,6 +472,7 @@ def _format_doctor_markdown(data: dict[str, Any]) -> str:
         ("tavily", data.get("tavily_connection_test") or {}),
         ("jina", data.get("jina_connection_test") or {}),
         ("firecrawl", data.get("firecrawl_connection_test") or {}),
+        ("camofox-browser", data.get("camofox_connection_test") or {}),
         ("zhipu", data.get("zhipu_connection_test") or {}),
         ("zhipu-mcp", data.get("zhipu_mcp_connection_test") or {}),
         ("context7", data.get("context7_connection_test") or {}),
@@ -1272,6 +1296,7 @@ def _display_provider(provider: str, lang: str) -> str:
         "jina": "Jina Reader",
         "tavily": "Tavily",
         "firecrawl": "Firecrawl",
+        "camofox-browser": "Camofox Browser",
         "anysearch": "AnySearch",
     }
     return names.get(provider, provider)
@@ -1441,7 +1466,7 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
     status = {
         "main_search": {
             "configured": [provider for provider in ("xai-responses", "openai-compatible") if provider in main_configured],
-            "fallback_chain": ["xai-responses", "openai-compatible"],
+            "scenario_role": service.CAPABILITY_SCENARIO_ROLES["main_search"],
         },
         "web_search": {
             "configured": [
@@ -1454,7 +1479,7 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
                 ]
                 if configured
             ],
-            "fallback_chain": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"],
+            "scenario_role": service.CAPABILITY_SCENARIO_ROLES["web_search"],
         },
         "docs_search": {
             "configured": [
@@ -1465,7 +1490,7 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
                 ]
                 if configured
             ],
-            "fallback_chain": ["context7", "exa"],
+            "scenario_role": service.CAPABILITY_SCENARIO_ROLES["docs_search"],
         },
         "web_fetch": {
             "configured": [
@@ -1475,14 +1500,15 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
                     ("jina", has("JINA_API_KEY")),
                     ("zhipu-mcp-reader", has("ZHIPU_MCP_API_KEY")),
                     ("firecrawl", has("FIRECRAWL_API_KEY")),
+                    ("camofox-browser", has("CAMOFOX_AUTH_TOKEN") or has("CAMOFOX_TOKEN_COMMAND") or has("CAMOFOX_TUNNEL_SCRIPT")),
                 ]
                 if configured
             ],
-            "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
+            "scenario_role": service.CAPABILITY_SCENARIO_ROLES["web_fetch"],
         },
         "vertical_search": {
             "configured": ["anysearch"] if has("ANYSEARCH_API_KEY") else [],
-            "fallback_chain": ["anysearch"],
+            "scenario_role": service.CAPABILITY_SCENARIO_ROLES["vertical_search"],
             "experimental": True,
         },
     }
@@ -2003,8 +2029,8 @@ def _prompt_web_fetch(values: dict[str, str], current: dict[str, str], lang: str
     _write_stderr(
         _t(
             lang,
-            "\n[3/3 必选] web_fetch 网页抓取\n用途: 已知 URL 抓正文；高风险事实核验必须用。\n推荐: Tavily 优先；Jina 需要 key 才算标准配置；Firecrawl 可作为抓取兜底。\n",
-            "\n[3/3 Required] web_fetch page fetch\nPurpose: extract known URLs; required for high-risk fact checks.\nRecommended: Tavily first; Jina requires a key to satisfy standard config; Firecrawl as fetch fallback.\n",
+            "\n[3/3 必选] web_fetch 网页抓取\n用途: 已知 URL 抓正文；高风险事实核验必须用。\n推荐: 配一个常规 fetch API；页面渲染、反爬或额度耗尽时，用 Camofox 本地浏览器做场景兜底。\n",
+            "\n[3/3 Required] web_fetch page fetch\nPurpose: extract known URLs; required for high-risk fact checks.\nRecommended: configure one normal fetch API; use local Camofox as the browser fallback for rendered, blocked, or quota-exhausted pages.\n",
         )
     )
     selected = _prompt_provider_multi_select(
@@ -2595,6 +2621,14 @@ def _run_setup(args: argparse.Namespace) -> int:
         "JINA_READER_API_URL": _normalize_jina_reader_api_url(args.jina_reader_api_url),
         "JINA_RESPOND_WITH": args.jina_respond_with,
         "JINA_TIMEOUT_SECONDS": args.jina_timeout,
+        "CAMOFOX_BROWSER_FETCH_ENABLED": args.camofox_browser_fetch_enabled,
+        "CAMOFOX_MCP_URL": args.camofox_mcp_url.strip(),
+        "CAMOFOX_HEALTH_URL": args.camofox_health_url.strip(),
+        "CAMOFOX_AUTH_TOKEN": args.camofox_auth_token,
+        "CAMOFOX_TOKEN_COMMAND": args.camofox_token_command,
+        "CAMOFOX_TUNNEL_SCRIPT": args.camofox_tunnel_script,
+        "CAMOFOX_SSH_HOST": args.camofox_ssh_host,
+        "CAMOFOX_FETCH_TIMEOUT_SECONDS": args.camofox_fetch_timeout,
         "TAVILY_API_URL": _normalize_tavily_flag_api_url(args.tavily_api_url, args.tavily_key),
         "TAVILY_API_KEY": args.tavily_key,
         "FIRECRAWL_API_URL": _normalize_firecrawl_api_url(args.firecrawl_api_url),
@@ -3069,6 +3103,14 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--jina-reader-api-url", default="", help="Save JINA_READER_API_URL.")
     setup_parser.add_argument("--jina-respond-with", default="", help="Save JINA_RESPOND_WITH, e.g. readerlm-v2.")
     setup_parser.add_argument("--jina-timeout", default="", help="Save JINA_TIMEOUT_SECONDS.")
+    setup_parser.add_argument("--camofox-browser-fetch-enabled", default="", help="Save CAMOFOX_BROWSER_FETCH_ENABLED.")
+    setup_parser.add_argument("--camofox-mcp-url", default="", help="Save CAMOFOX_MCP_URL.")
+    setup_parser.add_argument("--camofox-health-url", default="", help="Save CAMOFOX_HEALTH_URL.")
+    setup_parser.add_argument("--camofox-auth-token", default="", help="Save CAMOFOX_AUTH_TOKEN.")
+    setup_parser.add_argument("--camofox-token-command", default="", help="Save CAMOFOX_TOKEN_COMMAND.")
+    setup_parser.add_argument("--camofox-tunnel-script", default="", help="Save CAMOFOX_TUNNEL_SCRIPT.")
+    setup_parser.add_argument("--camofox-ssh-host", default="", help="Save CAMOFOX_SSH_HOST.")
+    setup_parser.add_argument("--camofox-fetch-timeout", default="", help="Save CAMOFOX_FETCH_TIMEOUT_SECONDS.")
     setup_parser.add_argument("--tavily-api-url", default="", help="Save TAVILY_API_URL.")
     setup_parser.add_argument("--tavily-key", default="", help="Save TAVILY_API_KEY.")
     setup_parser.add_argument("--firecrawl-api-url", default="", help="Save FIRECRAWL_API_URL.")

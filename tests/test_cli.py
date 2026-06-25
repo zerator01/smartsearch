@@ -369,9 +369,22 @@ def test_doctor_markdown_outputs_human_health_report(monkeypatch, capsys):
             "minimum_profile_ok": True,
             "minimum_profile_missing": [],
             "capability_status": {
-                "main_search": {"ok": True, "configured": ["openai-compatible"], "fallback_chain": ["xai-responses", "openai-compatible"]},
-                "docs_search": {"ok": True, "configured": ["context7"], "fallback_chain": ["context7", "exa"]},
-                "web_fetch": {"ok": True, "configured": ["tavily", "jina"], "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"]},
+                "main_search": {"ok": True, "configured": ["openai-compatible"], "scenario_role": "discovery layer"},
+                "docs_search": {"ok": True, "configured": ["context7"], "scenario_role": "docs layer"},
+                "web_fetch": {"ok": True, "configured": ["tavily", "jina"], "scenario_role": "known URL evidence layer"},
+            },
+            "scenario_fallbacks": {
+                "principle": "Fallback is scenario-first.",
+                "scenarios": {
+                    "known_url_evidence": {
+                        "role": "Read selected URLs.",
+                        "layers": [
+                            {"step": "api_fetch", "role": "Use configured fetch APIs", "status": "available"},
+                            {"step": "camofox_fetch", "role": "Open rendered pages in Camofox", "status": "available"},
+                        ],
+                    }
+                },
+                "boundary": "Camofox is a browser evidence layer.",
             },
             "main_search_connection_tests": {
                 "openai-compatible": {
@@ -437,6 +450,10 @@ def test_doctor_markdown_outputs_human_health_report(monkeypatch, capsys):
     assert "## Configuration Values" in out
     assert "| XAI_API_KEY | default | 未配置 |" in out
     assert "## Capabilities" in out
+    assert "Scenario role" in out
+    assert "Fallback chain" not in out
+    assert "## Scenario Fallbacks" in out
+    assert "known_url_evidence" in out
     assert "## Main Search Providers" in out
     assert "openai-compatible" in out
     assert "## Provider Details" in out
@@ -458,7 +475,7 @@ def test_doctor_content_outputs_non_empty_summary(monkeypatch, capsys):
             "config_status": "missing config",
             "minimum_profile_ok": False,
             "capability_status": {
-                "main_search": {"ok": False, "configured": [], "fallback_chain": ["xai-responses", "openai-compatible"]}
+                "main_search": {"ok": False, "configured": [], "scenario_role": "discovery layer"}
             },
             "intent_router_status": {
                 "embedding_preset_recommendation": "Qwen/Qwen3-Embedding-8B works best with calibrated threshold and margin.",
@@ -2192,7 +2209,7 @@ def test_setup_guided_main_search_can_save_both_peer_providers(monkeypatch, caps
         "OPENAI_COMPATIBLE_API_KEY": "relay-test-secret",
     }
     assert data["capability_status"]["main_search"]["configured"] == ["xai-responses", "openai-compatible"]
-    assert data["capability_status"]["main_search"]["fallback_chain"] == ["xai-responses", "openai-compatible"]
+    assert data["capability_status"]["main_search"]["scenario_role"] == cli.service.CAPABILITY_SCENARIO_ROLES["main_search"]
 
 
 def test_setup_guided_can_configure_intent_router(monkeypatch, capsys):

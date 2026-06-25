@@ -33,6 +33,7 @@ from .intent_router import (
 )
 from .logger import log_info
 from .providers.anysearch import AnySearchProvider
+from .providers.camofox import CamofoxBrowserProvider
 from .providers.context7 import Context7Provider
 from .providers.exa import ExaSearchProvider
 from .providers.jina import JinaReaderProvider
@@ -124,22 +125,52 @@ DEEP_RECENT_KEYWORDS = {
 DEEP_CURRENT_KEYWORDS = {"今天", "实时", "刚刚", "当前", "现在", "today", "current", "live", "realtime"}
 DEEP_CHINA_KEYWORDS = {"中国", "国内", "中文", "政策", "监管", "公告", "A股", "港股"}
 DEEP_EXA_DISCOVERY_KEYWORDS = {
-    "官方",
-    "官网",
     "论文",
     "paper",
     "papers",
     "research paper",
-    "产品页",
-    "product page",
-    "可信站点",
-    "trusted",
+    "official docs",
+    "official documentation",
+    "official api",
+    "developer docs",
+    "reference docs",
     "known domain",
     "known domains",
     "site:",
     "白皮书",
     "standard",
     "standards",
+}
+DEEP_EXPLICIT_EXA_KEYWORDS = {
+    "exa-search",
+    "use exa",
+    "with exa",
+    "用 exa",
+    "用exa",
+    "低噪声",
+    "low-noise",
+    "low noise",
+    "相似页面",
+    "相邻来源",
+    "similar pages",
+    "related pages",
+    "neighboring sources",
+}
+DEEP_SUPPLIER_DIRECTORY_KEYWORDS = {
+    "supplier",
+    "suppliers",
+    "vendor",
+    "vendors",
+    "directory",
+    "directory site",
+    "listing",
+    "listings",
+    "procurement",
+    "采购",
+    "供应商",
+    "目录站",
+    "商家",
+    "展商",
 }
 RESEARCH_ROUTE_POLICY_VERSION = "research-router-v1"
 RESEARCH_VERTICAL_KEYWORDS = ROUTER_VERTICAL_INTENT_KEYWORDS
@@ -160,7 +191,7 @@ RESEARCH_PROFILE_ORDER = {
     "main_search": ["xai-responses", "openai-compatible"],
     "web_search": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"],
     "docs_search": ["context7", "exa"],
-    "web_fetch": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
+    "web_fetch": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl", "camofox-browser"],
     "vertical_search": ["anysearch"],
     "site_map": ["tavily"],
     "synthesis": ["main-search"],
@@ -195,7 +226,7 @@ PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
     },
     "exa": {
         "capability": "docs_search",
-        "strengths": ["official domains", "papers", "product pages", "trusted low-noise discovery", "similar pages"],
+        "strengths": ["explicit docs/API/papers/standards", "known-domain/site searches", "requested low-noise discovery", "similar pages"],
         "exclusions": ["default second hop for every high-risk claim"],
         "fallback_group": "docs_search",
         "minimum_profile_role": "docs_search",
@@ -258,6 +289,15 @@ PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
         "quality_filters": ["non-empty normalized result", "non-empty extracted content"],
         "route_reasons": ["JS-heavy fetch", "dynamic/browser-like extraction", "robust fetch fallback"],
     },
+    "camofox-browser": {
+        "capability": "web_fetch",
+        "strengths": ["local browser runtime", "JavaScript-rendered pages", "accessibility snapshots", "anti-detect browser fallback"],
+        "exclusions": ["general search provider", "docs semantic replacement", "LLM extraction"],
+        "fallback_group": "web_fetch",
+        "minimum_profile_role": "web_fetch_local_browser",
+        "quality_filters": ["healthy bridge", "auth token available", "non-empty accessibility snapshot"],
+        "route_reasons": ["known URL browser fetch", "final local browser fallback", "JS-rendered source verification"],
+    },
     "anysearch": {
         "capability": "vertical_search",
         "strengths": ["CVE", "finance", "legal", "academic", "code/docs", "structured vertical domains"],
@@ -279,6 +319,21 @@ PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 MAIN_SEARCH_FALLBACK_CHAIN = ["xai-responses", "openai-compatible"]
+WEB_FETCH_FALLBACK_CHAIN = ["tavily", "jina", "zhipu-mcp-reader", "firecrawl", "camofox-browser"]
+CAPABILITY_PROVIDER_ORDERS = {
+    "main_search": MAIN_SEARCH_FALLBACK_CHAIN,
+    "web_search": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"],
+    "docs_search": ["context7", "exa"],
+    "web_fetch": WEB_FETCH_FALLBACK_CHAIN,
+    "vertical_search": ["anysearch"],
+}
+CAPABILITY_SCENARIO_ROLES = {
+    "main_search": "discovery and synthesis layer; browser fetch is not a replacement",
+    "web_search": "scenario API reinforcement for current, Chinese/domestic, or broad web discovery",
+    "docs_search": "scenario API reinforcement for docs, SDKs, APIs, papers, and trusted official sources",
+    "web_fetch": "known-URL evidence layer; browser fetch is the final page-visible fallback",
+    "vertical_search": "explicit experimental vertical-domain search only",
+}
 MAIN_SEARCH_PROVIDER_ALIASES = {
     "xai-responses": {"xai-responses", "xai", "grok", "grok-web-tools"},
     "openai-compatible": {"openai-compatible", "openai", "chat-completions", "primary"},
@@ -444,11 +499,30 @@ def _provider_configured(provider: str) -> bool:
         return bool(config.zhipu_mcp_api_key)
     if provider == "firecrawl":
         return bool(config.firecrawl_api_key)
+    if provider == "camofox-browser":
+        return _camofox_browser_fetch_configured()
     if provider == "anysearch":
         return bool(config.anysearch_api_key)
     if provider == "main-search":
         return bool(config.xai_api_key or (config.openai_compatible_api_url and config.openai_compatible_api_key))
     return False
+
+
+def _camofox_provider() -> CamofoxBrowserProvider:
+    return CamofoxBrowserProvider(
+        mcp_url=config.camofox_mcp_url,
+        health_url=config.camofox_health_url,
+        auth_token=config.camofox_auth_token or "",
+        token_command=config.camofox_token_command,
+        tunnel_script=config.camofox_tunnel_script,
+        ssh_host=config.camofox_ssh_host,
+        timeout=config.camofox_fetch_timeout,
+        enabled=config.camofox_browser_fetch_enabled,
+    )
+
+
+def _camofox_browser_fetch_configured() -> bool:
+    return _camofox_provider().configured()
 
 
 def _configured_for_capability(capability: str, capability_status: dict[str, Any] | None = None) -> list[str]:
@@ -494,11 +568,11 @@ def _research_fetch_order(query: str, url: str = "", capability_status: dict[str
     providers = _configured_for_capability("web_fetch", capability_status)
     target = f"{query} {url}".lower()
     if _contains_any(target, RESEARCH_JS_HEAVY_KEYWORDS):
-        preferred = ["firecrawl", "tavily", "jina", "zhipu-mcp-reader"]
+        preferred = ["firecrawl", "camofox-browser", "tavily", "jina", "zhipu-mcp-reader"]
     elif _contains_any(target, RESEARCH_PDF_KEYWORDS) or url.lower().endswith(".pdf"):
-        preferred = ["jina", "tavily", "zhipu-mcp-reader", "firecrawl"]
+        preferred = ["jina", "tavily", "zhipu-mcp-reader", "firecrawl", "camofox-browser"]
     elif url or _extract_urls(query):
-        preferred = ["jina", "tavily", "zhipu-mcp-reader", "firecrawl"]
+        preferred = ["jina", "tavily", "zhipu-mcp-reader", "firecrawl", "camofox-browser"]
     else:
         preferred = providers
     ordered = [provider for provider in preferred if provider in providers]
@@ -512,7 +586,7 @@ def _research_route_signals(question: str, plan: dict[str, Any]) -> dict[str, An
     text = question.lower()
     return {
         "docs_api_intent": rules_route.docs_intent,
-        "official_low_noise_intent": _contains_any(question, DEEP_EXA_DISCOVERY_KEYWORDS),
+        "official_low_noise_intent": _should_use_exa_discovery(question, docs_intent=rules_route.docs_intent),
         "current_or_locale_intent": rules_route.web_current_intent,
         "known_url": rules_route.fetch_intent,
         "pdf_or_arxiv_intent": _contains_any(question, RESEARCH_PDF_KEYWORDS),
@@ -704,6 +778,20 @@ def _contains_any(query: str, keywords: set[str]) -> bool:
     return any(keyword.lower() in q for keyword in keywords)
 
 
+def _is_supplier_or_directory_discovery(query: str) -> bool:
+    return _contains_any(query, DEEP_SUPPLIER_DIRECTORY_KEYWORDS)
+
+
+def _should_use_exa_discovery(query: str, *, docs_intent: bool = False) -> bool:
+    if _is_supplier_or_directory_discovery(query) and not _contains_any(query, DEEP_EXPLICIT_EXA_KEYWORDS):
+        return False
+    return (
+        _contains_any(query, DEEP_EXA_DISCOVERY_KEYWORDS)
+        or _contains_any(query, DEEP_EXPLICIT_EXA_KEYWORDS)
+        or (docs_intent and _contains_any(query, {"official docs", "official documentation", "official api", "site:"}))
+    )
+
+
 def _extract_urls(query: str) -> list[str]:
     return router_extract_urls(query)
 
@@ -837,6 +925,7 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
         url = urls[0]
         parsed = urlparse(url)
         host = parsed.netloc or "provided URL"
+        wants_adjacent_sources = _contains_any(question, DEEP_EXPLICIT_EXA_KEYWORDS)
         decomposition.append(
             _deep_subquestion(
                 "sq1",
@@ -856,13 +945,16 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
         capability_plan.extend(
             [
                 _deep_capability("page_evidence", ["fetch"], "Fetch the user-provided URL before making claims."),
-                _deep_capability("adjacent_source_discovery", ["exa-similar"], "Find pages adjacent to the known source."),
                 _deep_capability("broad_discovery", ["search"], "Broaden the context if the fetched page leaves gaps."),
             ]
         )
         add_step("sq1", "fetch", "fetch user supplied URL first", f"smart-search fetch {_quote_arg(url)} --format markdown --output {_quote_arg(_path_join(evidence_root, '01-fetch.md'))}", "01-fetch.md")
-        add_step("sq2", "exa-similar", "find adjacent sources from the provided URL", f"smart-search exa-similar {_quote_arg(url)} --num-results 5 --format json --output {_quote_arg(_path_join(evidence_root, '02-similar.json'))}", "02-similar.json")
-        add_step("sq2", "search", "broad discovery for missing context", command_search(question, 1), "03-search.json")
+        if wants_adjacent_sources:
+            capability_plan.append(_deep_capability("adjacent_source_discovery", ["exa-similar"], "Find pages adjacent to the known source when explicitly requested."))
+            add_step("sq2", "exa-similar", "find adjacent sources from the provided URL", f"smart-search exa-similar {_quote_arg(url)} --num-results 5 --format json --output {_quote_arg(_path_join(evidence_root, '02-similar.json'))}", "02-similar.json")
+            add_step("sq2", "search", "broad discovery for missing context", command_search(question, 1), "03-search.json")
+        else:
+            add_step("sq2", "search", "broad discovery for missing context", command_search(question, 1), "02-search.json")
     else:
         decomposition.append(
             _deep_subquestion(
@@ -880,7 +972,7 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
                 _deep_subquestion(
                     "sq2",
                     f"{question} 的官方文档、API 或 SDK 证据在哪里？",
-                    "docs/API intent should resolve the library docs first, with Exa only as official-domain discovery.",
+                    "docs/API intent should resolve the library docs first, with Exa only for explicit known-domain, paper, standard, or low-noise discovery.",
                     ["docs_source_discovery", "page_evidence"],
                 )
             )
@@ -888,7 +980,7 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
                 _deep_capability(
                     "docs_source_discovery",
                     ["context7-library", "context7-docs"],
-                    "Resolve official library/API documentation first; use Exa only for official-domain or supplemental discovery.",
+                    "Resolve official library/API documentation first; use Exa only for explicit known-domain, paper, standard, or low-noise supplemental discovery.",
                 )
             )
             library_hint = " ".join(re.findall(r"[A-Za-z][A-Za-z0-9_.-]*", question)[:2]) or "<library-name>"
@@ -906,15 +998,15 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
                 f"smart-search context7-docs {_quote_arg('<library_id>')} {_quote_arg(question)} --format json --output {_quote_arg(_path_join(evidence_root, next_filename('context7-docs.json')))}",
                 next_filename("context7-docs.json"),
             )
-            if _contains_any(question, DEEP_EXA_DISCOVERY_KEYWORDS):
+            if _should_use_exa_discovery(question, docs_intent=docs_intent):
                 capability_plan.append(
                     _deep_capability(
                         "official_domain_discovery",
                         ["exa-search"],
-                        "Use Exa for official-domain or low-noise supplemental docs discovery.",
+                        "Use Exa for explicit known-domain, paper, standard, or low-noise supplemental docs discovery.",
                     )
                 )
-                add_step("sq2", "exa-search", "official-domain docs source discovery", command_exa(f"{question} official docs"), next_filename("exa.json"))
+                add_step("sq2", "exa-search", "known-domain or low-noise docs source discovery", command_exa(f"{question} official docs"), next_filename("exa.json"))
 
         if recency_requirement != "none" or locale_domain_scope == "china":
             sub_id = f"sq{len(decomposition) + 1}"
@@ -951,7 +1043,7 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
                 capability_plan.append(
                     _deep_capability("cross_validation", ["search"], "Compare independent sources before final claims; supplemental tools depend on intent.")
                 )
-            if budget == "deep" and _contains_any(question, DEEP_EXA_DISCOVERY_KEYWORDS):
+            if budget == "deep" and _should_use_exa_discovery(question, docs_intent=docs_intent) and not any(step["tool"] == "exa-search" for step in steps):
                 add_step("sq3", "exa-search", "low-noise evidence for tradeoffs and risks", command_exa(f"{question} risks limitations comparison"), next_filename("exa.json"))
 
         if cross_validation_need == "high":
@@ -969,11 +1061,11 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
             elif docs_intent:
                 if "context7-library" not in cross_validation_tools:
                     cross_validation_tools.extend(["context7-library", "context7-docs"])
-            elif _contains_any(question, DEEP_EXA_DISCOVERY_KEYWORDS):
+            elif _should_use_exa_discovery(question, docs_intent=docs_intent):
                 if "exa-search" not in cross_validation_tools:
                     cross_validation_tools.append("exa-search")
                 if not any(step["tool"] == "exa-search" for step in steps):
-                    add_step(target_subquestion, "exa-search", "official-domain or low-noise cross-source discovery", command_exa(question), next_filename("exa.json"))
+                    add_step(target_subquestion, "exa-search", "known-domain or low-noise cross-source discovery", command_exa(question), next_filename("exa.json"))
 
         capability_plan.append(_deep_capability("page_evidence", ["fetch"], "Fetch key URLs before claim-level conclusions."))
         add_step("sq1" if len(decomposition) == 1 else decomposition[-1]["id"], "fetch", "fetch key URLs before final claims", command_fetch(), next_filename("fetch.md"))
@@ -1203,6 +1295,8 @@ async def research(
         fallback_mode != "off"
         and signals["official_low_noise_intent"]
         and exa_in_selected_docs_route
+        and not discovery_sources
+        and not evidence_items
         and not any(source.get("provider") == "exa" for source in discovery_sources)
     ):
         exa_start = time.time()
@@ -1297,16 +1391,32 @@ async def research(
     return result
 
 
+def _capability_status_entry(
+    capability: str,
+    configured: list[str],
+    *,
+    ok: bool | None = None,
+    experimental: bool = False,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "configured": configured,
+        "scenario_role": CAPABILITY_SCENARIO_ROLES.get(capability, ""),
+        "ok": bool(configured) if ok is None else ok,
+    }
+    if experimental:
+        entry["experimental"] = True
+    if config.debug_enabled:
+        entry["internal_provider_order"] = CAPABILITY_PROVIDER_ORDERS.get(capability, [])
+    return entry
+
+
 def get_capability_status() -> dict[str, Any]:
     main_configured = _configured_main_search_provider_ids()
     status = {
-        "main_search": {
-            "configured": main_configured,
-            "fallback_chain": MAIN_SEARCH_FALLBACK_CHAIN,
-            "ok": bool(main_configured),
-        },
-        "web_search": {
-            "configured": [
+        "main_search": _capability_status_entry("main_search", main_configured),
+        "web_search": _capability_status_entry(
+            "web_search",
+            [
                 name
                 for name, enabled in [
                     ("zhipu", bool(config.zhipu_api_key)),
@@ -1316,10 +1426,10 @@ def get_capability_status() -> dict[str, Any]:
                 ]
                 if enabled
             ],
-            "fallback_chain": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"],
-        },
-        "docs_search": {
-            "configured": [
+        ),
+        "docs_search": _capability_status_entry(
+            "docs_search",
+            [
                 name
                 for name, enabled in [
                     ("context7", bool(config.context7_api_key)),
@@ -1327,29 +1437,27 @@ def get_capability_status() -> dict[str, Any]:
                 ]
                 if enabled
             ],
-            "fallback_chain": ["context7", "exa"],
-        },
-        "web_fetch": {
-            "configured": [
+        ),
+        "web_fetch": _capability_status_entry(
+            "web_fetch",
+            [
                 name
                 for name, enabled in [
                     ("tavily", bool(config.tavily_api_key)),
                     ("jina", bool(config.jina_api_key)),
                     ("zhipu-mcp-reader", bool(config.zhipu_mcp_api_key)),
                     ("firecrawl", bool(config.firecrawl_api_key)),
+                    ("camofox-browser", _camofox_browser_fetch_configured()),
                 ]
                 if enabled
             ],
-            "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
-        },
-        "vertical_search": {
-            "configured": ["anysearch"] if config.anysearch_api_key else [],
-            "fallback_chain": ["anysearch"],
-            "experimental": True,
-        },
+        ),
+        "vertical_search": _capability_status_entry(
+            "vertical_search",
+            ["anysearch"] if config.anysearch_api_key else [],
+            experimental=True,
+        ),
     }
-    for capability in ("web_search", "docs_search", "web_fetch", "vertical_search"):
-        status[capability]["ok"] = bool(status[capability]["configured"])
     return status
 
 
@@ -1373,6 +1481,50 @@ def validate_minimum_profile() -> dict[str, Any]:
     except ValueError as e:
         return {"ok": False, "error_type": "parameter_error", "error": str(e), "missing": []}
     return _minimum_profile_result(profile, get_capability_status())
+
+
+def _workflow_step(step: str, role: str, status: str) -> dict[str, str]:
+    return {"step": step, "role": role, "status": status}
+
+
+def _stagehand_local_configured() -> bool:
+    benchmark_script = Path("/Users/zerator/tmp/stagehand-camofox-benchmark/stagehand-smoke.mjs")
+    return bool(benchmark_script.exists() and (config.openai_compatible_api_key or config.xai_api_key))
+
+
+def get_scenario_fallbacks() -> dict[str, Any]:
+    main_available = bool(_configured_main_search_provider_ids())
+    browser_available = _camofox_browser_fetch_configured()
+    stagehand_available = _stagehand_local_configured()
+    return {
+        "principle": "Fallback is scenario-first: discover sources, fetch evidence, then extract structure. Provider attempt order stays an internal implementation detail unless debug output is enabled.",
+        "scenarios": {
+            "source_discovery": {
+                "role": "Find candidate URLs for broad, current, Chinese/domestic, docs, or official-source questions.",
+                "layers": [
+                    _workflow_step("main_search_discover", "Use main_search/Grok-style discovery for candidate URLs and answer shape", "available" if main_available else "needs_main_search"),
+                    _workflow_step("scenario_api_reinforce", "Use Zhipu, Exa, or Context7 only when the task scenario calls for that paid API", "available"),
+                    _workflow_step("browser_verify", "When paid discovery/fetch quota is exhausted, verify selected URLs with Camofox", "available" if browser_available else "needs_camofox"),
+                ],
+            },
+            "known_url_evidence": {
+                "role": "Read a URL the user or discovery layer already selected.",
+                "layers": [
+                    _workflow_step("api_fetch", "Use configured fetch/extract APIs for normal known-URL evidence", "available"),
+                    _workflow_step("camofox_fetch", "If API fetch fails, is out of quota, or misses rendered content, open the page in Camofox", "available" if browser_available else "needs_camofox"),
+                    _workflow_step("stagehand_extract", "Use Stagehand only when the fetched page needs structured fields or task-specific extraction", "available" if stagehand_available else "optional"),
+                ],
+            },
+            "dynamic_or_blocked_page": {
+                "role": "Handle JavaScript-heavy, anti-bot, or browser-only pages.",
+                "layers": [
+                    _workflow_step("camofox_fetch", "Open the page with the browser bridge and capture page-visible content", "available" if browser_available else "needs_camofox"),
+                    _workflow_step("stagehand_extract", "Extract structured facts from the rendered page when needed", "available" if stagehand_available else "optional"),
+                ],
+            },
+        },
+        "boundary": "Camofox is a browser evidence layer, not a drop-in replacement for main_search, Exa, Context7, Zhipu, or Tavily search indexes.",
+    }
 
 
 def _parse_provider_filter(providers: str = "auto") -> set[str] | None:
@@ -1549,6 +1701,8 @@ async def _run_web_fetch_fallback(
         providers.append("zhipu-mcp-reader")
     if config.firecrawl_api_key:
         providers.append("firecrawl")
+    if _camofox_browser_fetch_configured():
+        providers.append("camofox-browser")
     if preferred_order:
         allowed = {provider for provider in providers}
         ordered = [provider for provider in preferred_order if provider in allowed]
@@ -1576,16 +1730,27 @@ async def _run_web_fetch_fallback(
                     status = "error" if data.get("error_type") in {"auth_error", "config_error", "provider_error", "rate_limited", "timeout", "network_error", "runtime_error"} else "empty"
                     attempts.append(_attempt("web_fetch", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
                     continue
+            elif provider == "camofox-browser":
+                data = await camofox_fetch(url)
+                content = data.get("content") if data.get("ok") else None
+                if not data.get("ok"):
+                    status = "error" if data.get("error_type") in {"auth_error", "browser_unavailable", "browser_fetch_error", "browser_navigation_error", "config_error", "timeout", "network_error", "runtime_error"} else "empty"
+                    attempts.append(_attempt("web_fetch", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+                    continue
             else:
                 content = await call_firecrawl_scrape(url)
             if content and content.strip():
                 attempts.append(_attempt("web_fetch", provider, "ok", start, result_count=1))
-                return {
+                result = {
                     "ok": True,
                     "url": url,
                     "provider": provider,
                     "content": content,
-                }, attempts
+                }
+                if provider == "camofox-browser":
+                    result["content_format"] = data.get("content_format", "accessibility_snapshot")
+                    result["metadata"] = data.get("metadata", {})
+                return result, attempts
             attempts.append(_attempt("web_fetch", provider, "empty", start))
         except Exception as e:
             attempts.append(_attempt("web_fetch", provider, "error", start, error_type="runtime_error", error=str(e)))
@@ -2708,8 +2873,8 @@ async def fetch(url: str) -> dict[str, Any]:
             "elapsed_ms": _elapsed_ms(start),
         }
 
-    if not (config.tavily_api_key or config.jina_api_key or config.zhipu_mcp_api_key or config.firecrawl_api_key):
-        error = "TAVILY_API_KEY、JINA_API_KEY、ZHIPU_MCP_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
+    if not (config.tavily_api_key or config.jina_api_key or config.zhipu_mcp_api_key or config.firecrawl_api_key or _camofox_browser_fetch_configured()):
+        error = "TAVILY_API_KEY、JINA_API_KEY、ZHIPU_MCP_API_KEY、FIRECRAWL_API_KEY 均未配置，且 Camofox browser fetch 不可用"
         error_type = "config_error"
     else:
         error = "所有提取服务均未能获取内容"
@@ -2848,6 +3013,10 @@ def _zhipu_mcp_zread_provider() -> ZhipuMCPProvider:
 
 async def jina_fetch(url: str) -> dict[str, Any]:
     return await call_jina_reader(url)
+
+
+async def camofox_fetch(url: str) -> dict[str, Any]:
+    return await _decode_provider_json(await _camofox_provider().fetch(url), provider="camofox-browser")
 
 
 async def zhipu_mcp_search(query: str, count: int = 5) -> dict[str, Any]:
@@ -3404,6 +3573,17 @@ async def _test_jina_connection() -> dict[str, Any]:
     return {"status": status, "message": data.get("error", "Jina Reader 不可用"), "response_time_ms": response_time}
 
 
+async def _test_camofox_connection() -> dict[str, Any]:
+    if not config.camofox_browser_fetch_enabled:
+        return {"status": "disabled", "message": "CAMOFOX_BROWSER_FETCH_ENABLED=false"}
+    if not _camofox_browser_fetch_configured():
+        return {
+            "status": "not_configured",
+            "message": "Camofox browser fallback is not configured; set CAMOFOX_AUTH_TOKEN, CAMOFOX_TOKEN_COMMAND, or CAMOFOX_TUNNEL_SCRIPT.",
+        }
+    return await _camofox_provider().health()
+
+
 async def _test_zhipu_connection() -> dict[str, Any]:
     if not config.zhipu_api_key:
         return {"status": "not_configured", "message": "ZHIPU_API_KEY 未设置，智谱搜索功能不可用"}
@@ -3476,6 +3656,13 @@ async def doctor() -> dict[str, Any]:
     except Exception as e:
         info["jina_connection_test"] = {"status": "error", "message": str(e)}
 
+    try:
+        info["camofox_connection_test"] = await _test_camofox_connection()
+    except httpx.TimeoutException:
+        info["camofox_connection_test"] = {"status": "timeout", "message": "Camofox browser bridge 请求超时"}
+    except Exception as e:
+        info["camofox_connection_test"] = {"status": "error", "message": str(e)}
+
     if config.firecrawl_api_key:
         info["firecrawl_connection_test"] = {"status": "configured", "message": "FIRECRAWL_API_KEY 已设置"}
     else:
@@ -3507,6 +3694,7 @@ async def doctor() -> dict[str, Any]:
     info["minimum_profile_ok"] = minimum.get("ok", False)
     info["minimum_profile_missing"] = minimum.get("missing", [])
     info["intent_router_status"] = intent_router_status()
+    info["scenario_fallbacks"] = get_scenario_fallbacks()
     main_connection_tests = info.get("main_search_connection_tests") or {}
     main_search_statuses = [item.get("status") for item in main_connection_tests.values() if isinstance(item, dict)]
     primary_test = info.get("primary_connection_test", {})
@@ -3610,15 +3798,11 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
     cases: list[dict[str, Any]] = []
 
     minimum_status = {
-        "main_search": {
-            "configured": ["xai-responses", "openai-compatible"],
-            "fallback_chain": MAIN_SEARCH_FALLBACK_CHAIN,
-            "ok": True,
-        },
-        "web_search": {"configured": ["zhipu"], "fallback_chain": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"], "ok": True},
-        "docs_search": {"configured": ["context7"], "fallback_chain": ["context7", "exa"], "ok": True},
-        "web_fetch": {"configured": ["tavily"], "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"], "ok": True},
-        "vertical_search": {"configured": [], "fallback_chain": ["anysearch"], "ok": False, "experimental": True},
+        "main_search": _capability_status_entry("main_search", ["xai-responses", "openai-compatible"]),
+        "web_search": _capability_status_entry("web_search", ["zhipu"]),
+        "docs_search": _capability_status_entry("docs_search", ["context7"]),
+        "web_fetch": _capability_status_entry("web_fetch", ["tavily"]),
+        "vertical_search": _capability_status_entry("vertical_search", [], experimental=True),
     }
     minimum = _minimum_profile_result("standard", minimum_status)
     cases.append(
@@ -3633,7 +3817,7 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
         "standard",
         {
             **minimum_status,
-            "docs_search": {"configured": [], "fallback_chain": ["context7", "exa"], "ok": False},
+            "docs_search": _capability_status_entry("docs_search", []),
         },
     )
     cases.append(
@@ -3791,8 +3975,18 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
             "deep_research url prompt is fetch first",
             url_first_plan["intent_signals"]["known_url"]
             and url_first_plan["steps"][0]["tool"] == "fetch"
-            and any(step["tool"] == "exa-similar" for step in url_first_plan["steps"]),
+            and not any(step["tool"] == "exa-similar" for step in url_first_plan["steps"]),
             {"research_plan": url_first_plan},
+        )
+    )
+
+    supplier_plan = build_deep_research_plan("Dubai exhibition stand builder supplier contact portfolio official UAE", evidence_dir=r"C:\tmp\smart-search-evidence\supplier")
+    supplier_tools = {step["tool"] for step in supplier_plan["steps"]}
+    cases.append(
+        _case(
+            "deep_research supplier discovery avoids paid exa by default",
+            {"search", "fetch"} <= supplier_tools and "exa-search" not in supplier_tools and "exa-similar" not in supplier_tools,
+            {"research_plan": supplier_plan},
         )
     )
 
@@ -3809,8 +4003,8 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
         "standard",
         {
             **minimum_status,
-            "docs_search": {"configured": [], "fallback_chain": ["context7", "exa"], "ok": False},
-            "web_fetch": {"configured": [], "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"], "ok": False},
+            "docs_search": _capability_status_entry("docs_search", []),
+            "web_fetch": _capability_status_entry("web_fetch", []),
         },
     )
     cases.append(
@@ -3832,18 +4026,10 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
 
     mock_research_status = {
         **minimum_status,
-        "web_search": {
-            "configured": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"],
-            "fallback_chain": ["zhipu", "zhipu-mcp", "tavily", "firecrawl"],
-            "ok": True,
-        },
-        "docs_search": {"configured": ["context7", "exa"], "fallback_chain": ["context7", "exa"], "ok": True},
-        "web_fetch": {
-            "configured": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
-            "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
-            "ok": True,
-        },
-        "vertical_search": {"configured": ["anysearch"], "fallback_chain": ["anysearch"], "ok": True, "experimental": True},
+        "web_search": _capability_status_entry("web_search", ["zhipu", "zhipu-mcp", "tavily", "firecrawl"]),
+        "docs_search": _capability_status_entry("docs_search", ["context7", "exa"]),
+        "web_fetch": _capability_status_entry("web_fetch", ["tavily", "jina", "zhipu-mcp-reader", "firecrawl", "camofox-browser"]),
+        "vertical_search": _capability_status_entry("vertical_search", ["anysearch"], experimental=True),
     }
     docs_routes = _research_capability_routes("React useEffect API docs", docs_plan, "auto", capability_status=mock_research_status)
     zh_routes = _research_capability_routes("今天国内 AI 政策最新公告", market_plan, "auto", capability_status=mock_research_status)
@@ -3972,9 +4158,9 @@ async def _smoke_live(start: float) -> dict[str, Any]:
 
     if config.tavily_api_key or config.firecrawl_api_key:
         fetch_result = await fetch("https://example.com")
-        cases.append(_case("web fetch fallback chain", bool(fetch_result.get("ok")), {"provider": fetch_result.get("provider", ""), "provider_attempts": fetch_result.get("provider_attempts", [])}))
+        cases.append(_case("known URL evidence fallback", bool(fetch_result.get("ok")), {"provider": fetch_result.get("provider", ""), "provider_attempts": fetch_result.get("provider_attempts", [])}))
     else:
-        cases.append(_case("web fetch fallback chain", True, {"skipped": "no fetch providers configured"}))
+        cases.append(_case("known URL evidence fallback", True, {"skipped": "no fetch providers configured"}))
 
     failed = [c["name"] for c in cases if _case_failed(c)]
     degraded = [c["name"] for c in cases if not c.get("ok") and c.get("severity") == "degraded"]

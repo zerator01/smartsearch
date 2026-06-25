@@ -85,7 +85,7 @@ def test_deep_research_skill_contract_public_and_packaged_assets_match():
         "fetch_before_claim",
         "smart-search skills status",
         "smart-search skills update",
-        "Do not treat Exa as the universal second hop",
+        "not the default second hop after Grok/main search",
         "Prefer Context7 before Exa",
         "smart-search deep",
         "decomposition",
@@ -145,7 +145,7 @@ def test_deep_research_cli_contract_documents_plan_and_smoke_matrix():
         "fixed topic recipe ids are not required schema",
         "Mock-full coverage should cover trigger phrases",
         "research provider advantage routing",
-        "`research --fallback auto` permits same-capability fallback",
+        "`research --fallback auto` permits scenario-internal provider retries",
         "Live-limited coverage should run `doctor`, one broad `search`, one `exa-search`, and one `fetch`",
         "`smart-search skills status --targets codex,claude,cursor,hermes --format json`",
         "`smart-search skills update --targets codex,claude,cursor,hermes --format json`",
@@ -198,7 +198,7 @@ def test_search_timeout_retry_policy_is_distributable():
         "`smart-search search ... --timeout 180 --extra-sources 1 --format json --output PATH`",
         "not a shell-level `timeout` wrapper",
         "`SMART_SEARCH_RETRY_*` settings are not the contract",
-        "switch to source-first fallback",
+        "retry source discovery with the cheapest matching route first",
         "`exa-search --include-domains`",
         "`source_mode: \"fallback\"`",
     ]
@@ -426,7 +426,7 @@ def test_streaming_and_anysearch_contract_public_and_packaged_assets_match():
         "anysearch-extract",
         "anysearch-batch",
         "vertical_search",
-        "not part of the `web_search` fallback",
+        "not part of general web discovery",
         "not required by the `standard` minimum profile",
     ]
     for marker in required_markers:
@@ -444,7 +444,7 @@ def test_streaming_and_anysearch_contract_public_and_packaged_assets_match():
         "anysearch-domains",
         "anysearch-search",
         "vertical_search",
-        "不进入 `web_search` 兜底链",
+        "不进入通用网页发现",
         "不是 `standard` 最低配置要求",
     ]
     for marker in zh_required_markers:

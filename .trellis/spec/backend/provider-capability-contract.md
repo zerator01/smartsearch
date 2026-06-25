@@ -98,22 +98,23 @@ diagnose_openai_compatible(timeout_seconds=30.0) -> dict[str, Any]
 smoke(mode="mock") -> dict[str, Any]
 ```
 
-Main-search providers are peers, not nested fallbacks:
+Main-search providers are peers. Public output should describe this as the
+discovery/synthesis layer rather than a user-facing multi-step fallback ladder:
 
 ```text
-main_search fallback chain: xai-responses -> openai-compatible
+main_search peers: xai-responses, openai-compatible
 ```
 
 ## 3. Contracts
 
 Capabilities:
 
-| Capability | Provider order | Purpose |
+| Capability | Internal provider order | Purpose |
 | --- | --- | --- |
 | `main_search` | `xai-responses`, `openai-compatible` | Broad answer generation and synthesis |
 | `web_search` | `zhipu`, `zhipu-mcp`, `tavily`, `firecrawl` | General web-source reinforcement |
 | `docs_search` | `context7`, `exa` by intent | Documentation, SDK, API, library, and framework lookup |
-| `web_fetch` | `tavily`, `jina`, `zhipu-mcp-reader`, `firecrawl` | Known URL content extraction |
+| `web_fetch` | `tavily`, `jina`, `zhipu-mcp-reader`, `firecrawl`, `camofox-browser` | Known URL content extraction |
 | `vertical_search` | `anysearch` | Experimental structured/vertical search evidence |
 | `synthesis` | currently successful `main_search` provider | Final answer synthesis |
 
@@ -161,13 +162,19 @@ Deep Research planner orchestration:
 - Deep Research should inspect existing `search` observability fields
   (`routing_decision`, `provider_attempts`, `fallback_used`, `source_warning`)
   rather than introducing an opaque planner path.
+- `camofox-browser` is the browser evidence layer for known, selected, dynamic,
+  or blocked URLs. Do not promote it into `web_search`, `docs_search`, or
+  `main_search`; discovery-oriented quota fallbacks should use source discovery,
+  Camofox page verification, and any Stagehand extraction outside the provider
+  registry.
 - Deep Research must not add `exa-search` as an unconditional second hop for
   high claim risk, cross-validation, or comparison prompts. Choose the
   supplemental tool by intent: `zhipu-search` for Chinese/domestic/current
   evidence, `context7-library` plus `context7-docs` for docs/API/library
-  questions, `fetch` plus `exa-similar` for known URLs, and `exa-search` only
-  for official domains, papers, product pages, trusted sites, or explicit
-  low-noise discovery needs.
+  questions, `fetch` for known URLs, `exa-similar` only for explicit adjacent
+  source requests, and `exa-search` only for explicit docs/API/papers/standards,
+  known-domain/site: searches, user-requested low-noise discovery, or
+  insufficient main-search discovery.
 - Research provider selection is capability-first and provider-advantage
   second. Future providers must register a profile before joining `research`.
   Profiles declare supported capability, strengths, exclusions, fallback group,
@@ -179,9 +186,10 @@ Deep Research planner orchestration:
   providers are reported in routing metadata and ignored; overrides must never
   move a provider across capability boundaries.
 - Baseline `research` provider advantages:
-  Context7 for library/API/framework docs; Exa for official domains, papers,
-  product/company pages, date/domain-filtered low-noise discovery, and adjacent
-  sources; Zhipu REST for Chinese/domestic/current/policy/announcement
+  Context7 for library/API/framework docs; Exa for explicit docs/API/papers/
+  standards, known-domain/site: searches, user-requested low-noise discovery,
+  insufficient main-search discovery, and explicit adjacent-source requests;
+  Zhipu REST for Chinese/domestic/current/policy/announcement
   searches; Zhipu MCP only as the separate Coding Plan quota route; Tavily for
   broad discovery and site maps; Jina for known public URL/PDF/arXiv clean
   extraction; Firecrawl for JS-heavy/dynamic/browser-like/OCR/PDF/structured
@@ -348,7 +356,7 @@ AnySearch boundary:
 - AnySearch is an experimental `vertical_search` provider exposed only through
   explicit `anysearch-*` CLI commands and capability diagnostics.
 - Do not insert AnySearch into `web_search`, `docs_search`, `web_fetch`, or
-  `main_search` fallback chains without a separate acceptance/routing task.
+  `main_search` provider handling without a separate acceptance/routing task.
 - AnySearch uses JSON-RPC 2.0 `tools/call` with tool names `list_domains`,
   `search`, `extract`, and `batch_search`.
 - AnySearch search/extract results must preserve raw markdown/text content.
@@ -669,19 +677,19 @@ smart-search doctor --format json
 | `anysearch-batch` receives more than five queries | Return `error_type: "parameter_error"` without a network request |
 | Exa `--include-domains` / `--exclude-domains` receives comma-separated, whitespace-separated, or PowerShell-split values | Normalize to a flat domain list before sending `includeDomains` / `excludeDomains` to Exa |
 | Exa returns HTTP 400 or 422 | Return `error_type: "parameter_error"` and preserve the Exa response body excerpt for diagnosis |
-| Provider HTTP/network/timeout/schema error | Record `provider_attempts[].status="error"` and try next same-capability provider when fallback is `auto` |
-| Provider returns empty normalized result | Record `status="empty"` and try next same-capability provider when fallback is `auto` |
-| `--fallback off` | Try only the first matching provider in the capability chain |
-| `research --fallback off` | Try only the first selected provider inside each capability route and report gaps rather than continuing through same-capability fallback |
-| Docs intent is false | Do not invoke Context7 or Exa as generic web-search fallback |
-| Fetch intent or known URL flow | Use the shared `web_fetch` chain only: Tavily, Jina with key, Zhipu MCP Reader, then Firecrawl |
+| Provider HTTP/network/timeout/schema error | Record `provider_attempts[].status="error"` and try the next provider inside the same scenario when fallback is `auto` |
+| Provider returns empty normalized result | Record `status="empty"` and try the next provider inside the same scenario when fallback is `auto` |
+| `--fallback off` | Try only the first matching provider in the capability route |
+| `research --fallback off` | Try only the first selected provider inside each capability route and report gaps rather than continuing through scenario-internal retries |
+| Docs intent is false | Do not invoke Context7 or Exa as generic web-search substitutes |
+| Fetch intent or known URL flow | Use the known-URL evidence scenario; normal fetch APIs first, then browser evidence when needed |
 | Jina Reader has no `JINA_API_KEY` | Do not register it as configured `web_fetch`; standard minimum profile remains missing unless another fetch provider is configured |
 | `JINA_RESPOND_WITH=readerlm-v2` without `JINA_API_KEY` | Return config error before network and do not count Jina toward `standard` |
-| Jina returns 401/403, 422, 429, timeout, network error, or challenge page such as `Title: Just a moment...` | Record a failed `web_fetch` provider attempt and continue same-capability fallback |
-| Zhipu Coding Plan MCP returns auth/rate/provider/timeout/network error | Record the error in `provider_attempts` when used through fallback and keep fallback same-capability |
+| Jina returns 401/403, 422, 429, timeout, network error, or challenge page such as `Title: Just a moment...` | Record a failed `web_fetch` provider attempt and continue the known-URL evidence scenario |
+| Zhipu Coding Plan MCP returns auth/rate/provider/timeout/network error | Record the error in `provider_attempts` when used through fallback and do not cross capability boundaries |
 | Zhipu MCP auth is configured | Send `Authorization: Bearer <key>` and never log the token unmasked |
 | Strict validation has no sources | Return `error_type: "evidence_error"` instead of pretending success |
-| One live enhancement provider fails but same capability has fallback | Live smoke may mark the case `degraded`; critical paths still fail non-zero |
+| One live enhancement provider fails but the same scenario can continue | Live smoke may mark the case `degraded`; critical paths still fail non-zero |
 | Interactive setup has guidance text | Write guidance to stderr and final rendered data to stdout |
 | Unknown `--install-skills` target | Return `error_type: "parameter_error"`; do not install any skill |
 | `--skip-skills` is set | Do not prompt for or install skills, even if `--install-skills` is also set |
@@ -703,7 +711,7 @@ smart-search doctor --format json
 | Deep Research skill contract changes | Assert `intent_signals`, `capability_plan`, `gap_check`, expanded tool allowlist, non-recipe schema, and README coverage |
 | Research executor has discovery snippets but no fetched evidence | Return degraded or failed gap report and do not cite discovery candidates |
 | Research provider advantage route changes | Add mock routing tests for docs/API, Chinese/current/policy, known URL/PDF/arXiv, JS-heavy/dynamic fetch, and vertical AnySearch intent |
-| Research fallback route changes | Assert fallback never crosses capability, provider failures and quality errors are recorded, and `--fallback off` disables same-capability fallback |
+| Research fallback route changes | Assert fallback never crosses capability, provider failures and quality errors are recorded, and `--fallback off` disables scenario-internal retries |
 | Already published npm version needs changed packaged assets | Do not assume retagging updates npm; cut a new patch version for installable artifacts |
 | Need a test npm publish without moving `latest` | Push a commit to `main` and verify the Actions run publishes `<base>-beta.N` with dist-tag `next` |
 
@@ -712,10 +720,10 @@ smart-search doctor --format json
 Good:
 
 - Query: `React useEffect API docs`.
-- Route: `main_search` answer plus `docs_search` fallback chain.
+- Route: `main_search` answer plus docs-search scenario reinforcement.
 - Expected: Context7 first for docs/API/library intent; Exa only after
-  Context7 error/empty result or when official-domain, paper, product-page,
-  trusted-site, or low-noise discovery is explicitly needed.
+  Context7 error/empty result or when explicit docs/API/papers/standards,
+  known-domain/site:, or user-requested low-noise discovery is needed.
 - Command: `smart-search exa-search "FreeRTOS Kernel latest release" --include-domains github.com,freertos.org --format json`.
 - Expected: CLI normalizes the domain filter to `["github.com", "freertos.org"]`.
 - Command: `smart-search exa-search "FreeRTOS Kernel latest release" --include-domains github.com freertos.org --format json`.
@@ -804,7 +812,7 @@ When this contract changes, add or update tests that assert:
   evidence-only synthesis with mocked providers;
 - `research` does not cite unfetched discovery candidates and returns degraded
   gaps when evidence cannot close;
-- `research --fallback off` disables same-capability fallback;
+- `research --fallback off` disables scenario-internal retries;
 - provider filters apply to main-search ids and aliases;
 - xAI Responses and OpenAI-compatible use separate explicit config families;
 - `XAI_API_KEY` alone does not fabricate an OpenAI-compatible fallback;
@@ -884,7 +892,7 @@ When this contract changes, add or update tests that assert:
 - setup output keeps prompts on stderr and parseable result data on stdout;
 - OpenAI-compatible alone can satisfy `main_search` in the setup wizard;
 - selecting both main providers saves distinct xAI and OpenAI-compatible
-  credentials and reports the fixed peer fallback chain;
+  credentials and reports the fixed peer provider handling;
 - `--advanced` retains low-level prompts and secret masking;
 - `setup --non-interactive --zhipu-api-url URL --zhipu-search-engine ENGINE`
   saves `ZHIPU_API_URL` and `ZHIPU_SEARCH_ENGINE`;
@@ -1016,7 +1024,7 @@ Guide by capability, then show the final minimum-profile result:
 
 ```text
 [1/3 Required] main_search: xAI Responses or OpenAI-compatible
-[2/3 Required] docs_search: Context7 for docs/API; Exa for official domains, papers, and low-noise discovery
+[2/3 Required] docs_search: Context7 for docs/API; Exa only for explicit docs/API/papers/standards, known-domain/site:, or requested low-noise discovery
 [3/3 Required] web_fetch: Tavily, Jina with key, Zhipu MCP Reader, or Firecrawl
 [Optional] web_search reinforcement: Zhipu / Tavily / Firecrawl
 ```

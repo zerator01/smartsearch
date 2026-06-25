@@ -67,6 +67,14 @@ class Config:
         "JINA_READER_API_URL",
         "JINA_RESPOND_WITH",
         "JINA_TIMEOUT_SECONDS",
+        "CAMOFOX_BROWSER_FETCH_ENABLED",
+        "CAMOFOX_MCP_URL",
+        "CAMOFOX_HEALTH_URL",
+        "CAMOFOX_AUTH_TOKEN",
+        "CAMOFOX_TOKEN_COMMAND",
+        "CAMOFOX_TUNNEL_SCRIPT",
+        "CAMOFOX_SSH_HOST",
+        "CAMOFOX_FETCH_TIMEOUT_SECONDS",
         "TAVILY_API_KEY",
         "TAVILY_API_URL",
         "TAVILY_ENABLED",
@@ -659,6 +667,52 @@ class Config:
     def jina_timeout(self) -> float:
         return float(self._get_config_value("JINA_TIMEOUT_SECONDS", "30") or "30")
 
+    @staticmethod
+    def _default_camofox_tunnel_script() -> str:
+        return ""
+
+    @property
+    def camofox_browser_fetch_enabled(self) -> bool:
+        return (self._get_config_value("CAMOFOX_BROWSER_FETCH_ENABLED", "true") or "true").lower() in ("true", "1", "yes")
+
+    @property
+    def camofox_mcp_url(self) -> str:
+        return self._get_config_value("CAMOFOX_MCP_URL", "http://127.0.0.1:19388/mcp") or "http://127.0.0.1:19388/mcp"
+
+    @property
+    def camofox_health_url(self) -> str:
+        value = self._get_config_value("CAMOFOX_HEALTH_URL")
+        if value:
+            return value
+        mcp_url = self.camofox_mcp_url.rstrip("/")
+        if mcp_url.endswith("/mcp"):
+            return f"{mcp_url[:-4]}/health"
+        return f"{mcp_url}/health"
+
+    @property
+    def camofox_auth_token(self) -> str | None:
+        return (
+            self._get_config_value("CAMOFOX_AUTH_TOKEN")
+            or self._get_config_value("CAMOFOX_BRIDGE_RESOLVED_TOKEN")
+            or self._get_config_value("CAMOFOX_BRIDGE_TOKEN")
+        )
+
+    @property
+    def camofox_token_command(self) -> str:
+        return self._get_config_value("CAMOFOX_TOKEN_COMMAND", "") or ""
+
+    @property
+    def camofox_tunnel_script(self) -> str:
+        return self._get_config_value("CAMOFOX_TUNNEL_SCRIPT", self._default_camofox_tunnel_script()) or ""
+
+    @property
+    def camofox_ssh_host(self) -> str:
+        return self._get_config_value("CAMOFOX_SSH_HOST", "hostinger-31") or ""
+
+    @property
+    def camofox_fetch_timeout(self) -> float:
+        return float(self._get_config_value("CAMOFOX_FETCH_TIMEOUT_SECONDS", "75") or "75")
+
     def get_config_info(self) -> dict:
         config_parameter_errors: list[str] = []
         explicit_main_configured = bool(
@@ -783,6 +837,14 @@ class Config:
             "JINA_READER_API_URL": self.jina_reader_api_url,
             "JINA_RESPOND_WITH": self.jina_respond_with,
             "JINA_TIMEOUT_SECONDS": self.jina_timeout,
+            "CAMOFOX_BROWSER_FETCH_ENABLED": self.camofox_browser_fetch_enabled,
+            "CAMOFOX_MCP_URL": self.camofox_mcp_url,
+            "CAMOFOX_HEALTH_URL": self.camofox_health_url,
+            "CAMOFOX_AUTH_TOKEN": self._mask_api_key(self.camofox_auth_token) if self.camofox_auth_token else "未配置",
+            "CAMOFOX_TOKEN_COMMAND": self._mask_if_secret("CAMOFOX_TOKEN_COMMAND", self.camofox_token_command) if self.camofox_token_command else "未配置",
+            "CAMOFOX_TUNNEL_SCRIPT": self.camofox_tunnel_script or "未配置",
+            "CAMOFOX_SSH_HOST": self.camofox_ssh_host or "未配置",
+            "CAMOFOX_FETCH_TIMEOUT_SECONDS": self.camofox_fetch_timeout,
             "primary_api_mode": "xai-responses" if self.xai_api_key else ("chat-completions" if self.openai_compatible_api_url and self.openai_compatible_api_key else "未配置"),
             "primary_api_mode_source": "config_file" if explicit_main_configured else "default",
             "config_file": str(self.config_file),

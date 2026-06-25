@@ -48,6 +48,14 @@ def _reset_config(monkeypatch, tmp_path):
         "JINA_READER_API_URL",
         "JINA_RESPOND_WITH",
         "JINA_TIMEOUT_SECONDS",
+        "CAMOFOX_BROWSER_FETCH_ENABLED",
+        "CAMOFOX_MCP_URL",
+        "CAMOFOX_HEALTH_URL",
+        "CAMOFOX_AUTH_TOKEN",
+        "CAMOFOX_TOKEN_COMMAND",
+        "CAMOFOX_TUNNEL_SCRIPT",
+        "CAMOFOX_SSH_HOST",
+        "CAMOFOX_FETCH_TIMEOUT_SECONDS",
         "TAVILY_API_KEY",
         "TAVILY_API_URL",
         "FIRECRAWL_API_KEY",
@@ -325,6 +333,34 @@ def test_jina_and_zhipu_mcp_config_defaults_and_saved_values(monkeypatch, tmp_pa
     assert service.config.zhipu_mcp_timeout == 12.0
 
 
+def test_camofox_config_defaults_and_saved_values(monkeypatch, tmp_path):
+    _reset_config(monkeypatch, tmp_path)
+
+    assert service.config.camofox_browser_fetch_enabled is True
+    assert service.config.camofox_mcp_url == "http://127.0.0.1:19388/mcp"
+    assert service.config.camofox_health_url == "http://127.0.0.1:19388/health"
+    assert service.config.camofox_auth_token is None
+    assert service.config.camofox_fetch_timeout == 75.0
+
+    service.config_set("CAMOFOX_BROWSER_FETCH_ENABLED", "false")
+    service.config_set("CAMOFOX_MCP_URL", "http://browser.example.com/mcp")
+    service.config_set("CAMOFOX_HEALTH_URL", "http://browser.example.com/healthz")
+    service.config_set("CAMOFOX_AUTH_TOKEN", "camofox-secret")
+    service.config_set("CAMOFOX_TOKEN_COMMAND", "printf token")
+    service.config_set("CAMOFOX_TUNNEL_SCRIPT", "/tmp/camofox-ensure-tunnel.sh")
+    service.config_set("CAMOFOX_SSH_HOST", "browser-host")
+    service.config_set("CAMOFOX_FETCH_TIMEOUT_SECONDS", "33")
+
+    assert service.config.camofox_browser_fetch_enabled is False
+    assert service.config.camofox_mcp_url == "http://browser.example.com/mcp"
+    assert service.config.camofox_health_url == "http://browser.example.com/healthz"
+    assert service.config.camofox_auth_token == "camofox-secret"
+    assert service.config.camofox_token_command == "printf token"
+    assert service.config.camofox_tunnel_script == "/tmp/camofox-ensure-tunnel.sh"
+    assert service.config.camofox_ssh_host == "browser-host"
+    assert service.config.camofox_fetch_timeout == 33.0
+
+
 def test_environment_overrides_config_file(monkeypatch, tmp_path):
     _reset_config(monkeypatch, tmp_path)
 
@@ -411,13 +447,14 @@ def test_deep_research_plan_complex_docs_query_has_decomposition():
 
 def test_deep_research_plan_docs_official_domain_can_add_exa_after_context7():
     result = service.build_deep_research_plan(
-        "React useEffect 官方 API docs",
+        "React useEffect official docs site:react.dev",
         budget="deep",
         evidence_dir="C:/tmp/smart-search-evidence/test-react-official",
     )
 
     tools = [step["tool"] for step in result["steps"]]
     assert {"context7-library", "context7-docs", "exa-search"} <= set(tools)
+    assert tools.count("exa-search") == 1
     assert tools.index("context7-library") < tools.index("exa-search")
     assert tools.index("context7-docs") < tools.index("exa-search")
 
@@ -432,7 +469,30 @@ def test_deep_research_plan_url_first_starts_with_fetch():
     assert result["difficulty"] == "standard"
     assert result["steps"][0]["tool"] == "fetch"
     assert "https://example.com/source" in result["steps"][0]["command"]
+    assert not any(step["tool"] == "exa-similar" for step in result["steps"])
+
+
+def test_deep_research_plan_url_first_uses_exa_similar_only_when_requested():
+    result = service.build_deep_research_plan(
+        "find similar pages for https://example.com/source",
+        evidence_dir="C:/tmp/smart-search-evidence/test-url-similar",
+    )
+
+    assert result["steps"][0]["tool"] == "fetch"
     assert any(step["tool"] == "exa-similar" for step in result["steps"])
+
+
+def test_deep_research_supplier_discovery_does_not_use_exa_for_generic_official_word():
+    result = service.build_deep_research_plan(
+        "Dubai exhibition stand builder supplier contact portfolio official UAE",
+        budget="deep",
+        evidence_dir="C:/tmp/smart-search-evidence/test-supplier",
+    )
+
+    tools = {step["tool"] for step in result["steps"]}
+    assert {"search", "fetch"} <= tools
+    assert "exa-search" not in tools
+    assert "exa-similar" not in tools
 
 
 def test_deep_research_claim_verification_does_not_unconditionally_add_exa():
@@ -485,6 +545,10 @@ def test_research_provider_profiles_are_registered_with_capability_boundaries():
     assert profiles["jina"]["minimum_profile_role"] == "web_fetch_with_key"
     assert "challenge page rejection" in profiles["jina"]["quality_filters"]
     assert "known URL extraction" in profiles["jina"]["route_reasons"]
+    assert profiles["camofox-browser"]["capability"] == "web_fetch"
+    assert profiles["camofox-browser"]["minimum_profile_role"] == "web_fetch_local_browser"
+    assert "general search provider" in profiles["camofox-browser"]["exclusions"]
+    assert "final local browser fallback" in profiles["camofox-browser"]["route_reasons"]
     assert profiles["anysearch"]["experimental"] is True
 
 
@@ -511,9 +575,11 @@ def test_research_router_uses_zhipu_for_chinese_current_policy(monkeypatch):
 def test_research_router_favors_jina_for_known_url_pdf_and_firecrawl_for_dynamic(monkeypatch):
     _configure_research_minimum(monkeypatch)
     monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-secret")
+    monkeypatch.setenv("CAMOFOX_AUTH_TOKEN", "camofox-secret")
 
     assert service._research_fetch_order("summarize https://arxiv.org/pdf/2401.00001.pdf")[0] == "jina"
-    assert service._research_fetch_order("抓取这个 dynamic javascript cloudflare 页面", "https://example.com/app")[0] == "firecrawl"
+    dynamic_order = service._research_fetch_order("抓取这个 dynamic javascript cloudflare 页面", "https://example.com/app")
+    assert dynamic_order[:2] == ["firecrawl", "camofox-browser"]
 
 
 def test_research_router_uses_anysearch_only_for_vertical_intent(monkeypatch):
@@ -674,6 +740,71 @@ async def test_research_fallback_off_does_not_run_supplemental_exa(monkeypatch, 
 
     assert result["ok"] is True
     assert all(attempt["provider"] != "exa" for attempt in result["provider_attempts"])
+
+
+@pytest.mark.asyncio
+async def test_research_does_not_run_exa_when_web_discovery_already_has_candidates(monkeypatch, tmp_path):
+    _configure_research_minimum(monkeypatch)
+
+    async def fail_exa(*args, **kwargs):
+        raise AssertionError("research should not run Exa after web discovery already found candidates")
+
+    async def fake_web_search(query, count=5, providers="auto", fallback="auto"):
+        return (
+            [{"url": "https://example.com/supplier", "title": "Supplier", "provider": "zhipu"}],
+            [service._attempt("web_search", "zhipu", "ok", time.time(), result_count=1)],
+        )
+
+    async def fake_fetch(url, fallback="auto", preferred_order=None):
+        return (
+            {"ok": True, "url": url, "provider": preferred_order[0], "content": "# Supplier\nEvidence body."},
+            [service._attempt("web_fetch", preferred_order[0], "ok", time.time(), result_count=1)],
+        )
+
+    monkeypatch.setattr(service, "exa_search", fail_exa)
+    monkeypatch.setattr(service, "_run_web_search_fallback", fake_web_search)
+    monkeypatch.setattr(service, "_run_web_fetch_fallback", fake_fetch)
+
+    result = await service.research(
+        "Dubai exhibition stand builder supplier contact portfolio official UAE",
+        evidence_dir=str(tmp_path),
+        fallback="auto",
+    )
+
+    assert result["ok"] is True
+    assert "zhipu" in result["providers_used"]
+    assert all(attempt["provider"] != "exa" for attempt in result["provider_attempts"])
+
+
+@pytest.mark.asyncio
+async def test_research_runs_exa_when_official_low_noise_query_has_no_other_candidates(monkeypatch, tmp_path):
+    _configure_research_minimum(monkeypatch)
+
+    async def fake_context7_library(*args, **kwargs):
+        return {"ok": False, "error_type": "", "error": "", "results": []}
+
+    async def fake_web_search(query, count=5, providers="auto", fallback="auto"):
+        return ([], [service._attempt("web_search", "zhipu", "empty", time.time())])
+
+    async def fake_exa(*args, **kwargs):
+        return {"ok": True, "results": [{"url": "https://react.dev/reference/react/useEffect", "title": "useEffect"}]}
+
+    async def fake_fetch(url, fallback="auto", preferred_order=None):
+        return (
+            {"ok": True, "url": url, "provider": preferred_order[0], "content": "# useEffect\nEvidence body."},
+            [service._attempt("web_fetch", preferred_order[0], "ok", time.time(), result_count=1)],
+        )
+
+    monkeypatch.setattr(service, "context7_library", fake_context7_library)
+    monkeypatch.setattr(service, "_run_web_search_fallback", fake_web_search)
+    monkeypatch.setattr(service, "exa_search", fake_exa)
+    monkeypatch.setattr(service, "_run_web_fetch_fallback", fake_fetch)
+
+    result = await service.research("React useEffect official docs", evidence_dir=str(tmp_path), fallback="auto")
+
+    docs_attempts = [attempt for attempt in result["provider_attempts"] if attempt["capability"] == "docs_search"]
+    assert result["ok"] is True
+    assert any(attempt["provider"] == "exa" and attempt["status"] == "ok" for attempt in docs_attempts)
 
 
 def test_legacy_main_search_config_keys_are_rejected(monkeypatch, tmp_path):
@@ -986,6 +1117,30 @@ def test_jina_key_satisfies_web_fetch_but_anonymous_jina_does_not(monkeypatch):
     assert with_key["capability_status"]["web_fetch"]["configured"] == ["jina"]
 
 
+def test_camofox_can_satisfy_web_fetch_as_local_browser_fallback(monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_MINIMUM_PROFILE", "standard")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-secret")
+    monkeypatch.setenv("CAMOFOX_AUTH_TOKEN", "camofox-test-secret")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.delenv("JINA_API_KEY", raising=False)
+    monkeypatch.delenv("ZHIPU_MCP_API_KEY", raising=False)
+
+    result = service.validate_minimum_profile()
+
+    assert result["ok"] is True
+    assert result["missing"] == []
+    assert result["capability_status"]["web_fetch"]["configured"] == ["camofox-browser"]
+    assert "browser fetch" in result["capability_status"]["web_fetch"]["scenario_role"]
+    assert "internal_provider_order" not in result["capability_status"]["web_fetch"]
+
+    monkeypatch.setenv("SMART_SEARCH_DEBUG", "true")
+    debug_result = service.validate_minimum_profile()
+    assert debug_result["capability_status"]["web_fetch"]["internal_provider_order"][-1] == "camofox-browser"
+
+
 def test_zhipu_mcp_key_satisfies_web_search_and_reader_fetch_as_separate_provider(monkeypatch):
     monkeypatch.setenv("SMART_SEARCH_MINIMUM_PROFILE", "standard")
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
@@ -1000,7 +1155,7 @@ def test_zhipu_mcp_key_satisfies_web_search_and_reader_fetch_as_separate_provide
     assert result["ok"] is True
     assert result["missing"] == []
     assert result["capability_status"]["web_search"]["configured"] == ["zhipu-mcp"]
-    assert result["capability_status"]["web_search"]["fallback_chain"] == ["zhipu", "zhipu-mcp", "tavily", "firecrawl"]
+    assert "scenario API" in result["capability_status"]["web_search"]["scenario_role"]
     assert result["capability_status"]["web_fetch"]["configured"] == ["zhipu-mcp-reader"]
 
 
@@ -1335,6 +1490,61 @@ async def test_fetch_uses_shared_chain_and_falls_back_after_jina_quality_error(m
     assert result["provider"] == "firecrawl"
     assert [a["provider"] for a in result["provider_attempts"]] == ["tavily", "jina", "firecrawl"]
     assert result["provider_attempts"][1]["error_type"] == "quality_error"
+
+
+@pytest.mark.asyncio
+async def test_fetch_falls_back_to_camofox_after_paid_fetchers_fail(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-secret")
+    monkeypatch.setenv("JINA_API_KEY", "jina-secret")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-secret")
+    monkeypatch.setenv("CAMOFOX_AUTH_TOKEN", "camofox-secret")
+
+    async def no_tavily(url):
+        return None
+
+    async def bad_jina(url):
+        return {"ok": False, "provider": "jina", "error_type": "quality_error", "error": "challenge"}
+
+    async def no_firecrawl(url, ctx=None):
+        return None
+
+    async def yes_camofox(url):
+        return {
+            "ok": True,
+            "provider": "camofox-browser",
+            "url": url,
+            "content": "# Browser Page",
+            "content_format": "accessibility_snapshot",
+            "metadata": {"snapshot_chars": 14},
+        }
+
+    monkeypatch.setattr(service, "call_tavily_extract", no_tavily)
+    monkeypatch.setattr(service, "jina_fetch", bad_jina)
+    monkeypatch.setattr(service, "call_firecrawl_scrape", no_firecrawl)
+    monkeypatch.setattr(service, "camofox_fetch", yes_camofox)
+
+    result = await service.fetch("https://example.com")
+
+    assert result["ok"] is True
+    assert result["provider"] == "camofox-browser"
+    assert result["content_format"] == "accessibility_snapshot"
+    assert [a["provider"] for a in result["provider_attempts"]] == ["tavily", "jina", "firecrawl", "camofox-browser"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_uses_camofox_when_it_is_the_only_fetch_provider(monkeypatch):
+    monkeypatch.setenv("CAMOFOX_AUTH_TOKEN", "camofox-secret")
+
+    async def yes_camofox(url):
+        return {"ok": True, "provider": "camofox-browser", "url": url, "content": "# Browser Only"}
+
+    monkeypatch.setattr(service, "camofox_fetch", yes_camofox)
+
+    result = await service.fetch("https://example.com")
+
+    assert result["ok"] is True
+    assert result["provider"] == "camofox-browser"
+    assert result["provider_attempts"][0]["provider"] == "camofox-browser"
 
 
 @pytest.mark.asyncio

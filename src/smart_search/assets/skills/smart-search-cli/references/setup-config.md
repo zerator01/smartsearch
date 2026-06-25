@@ -26,6 +26,7 @@
 - Use `smart-search doctor --format json` for agent/script parsing and `smart-search doctor --format markdown` when a human wants a detailed diagnostic report.
 - If `smart-search doctor --format json` returns `ok: false`, follow the `error` field's guidance (`smart-search setup` or `smart-search config set KEY VALUE`); do not silently fall back to native web search.
 - `doctor --format markdown` must render a detailed diagnostic report with overall status, active/default/legacy config paths, log path resolution, file-logging status, masked config values with sources, minimum profile, capability status, main-search provider checks, provider connectivity checks, intent router status, embedding threshold/margin metadata, model metadata, and full long error/message detail.
+- Doctor output includes `scenario_fallbacks` and Camofox Browser connectivity when configured. Firecrawl status currently reports whether `FIRECRAWL_API_KEY` is configured; Camofox health validates the local/remote browser bridge.
 - Use `smart-search diagnose openai-compatible --format markdown` when `doctor` succeeds but OpenAI-compatible `search` appears to hang, returns a timeout, or differs between `--stream` and `--no-stream`. It is the beginner-facing one-command report for upstream/relay compatibility.
 - `diagnose openai-compatible --format markdown` must render a short copy-pasteable troubleshooting report with masked config, quick chat check, real search-shape `stream=false` and `stream=true` checks, a plain-language summary, and a next command.
 
@@ -65,6 +66,7 @@
 - `ZHIPU_SEARCH_ENGINE` defaults to `search_std`.
 - Official Web Search API service values include `search_std`, `search_pro`, `search_pro_sogou`, and `search_pro_quark`.
 - Use `smart-search setup --non-interactive --jina-key "key"` to let Jina satisfy `web_fetch`; `JINA_RESPOND_WITH=readerlm-v2` also requires `JINA_API_KEY`.
+- Use `smart-search setup --non-interactive --camofox-mcp-url "http://127.0.0.1:19388/mcp" --camofox-auth-token "key"` or `--camofox-token-command` / `--camofox-tunnel-script` when Camofox should satisfy or reinforce `web_fetch`.
 - Use `smart-search setup --non-interactive --zhipu-mcp-key "key"` only when the user explicitly wants Coding Plan Remote MCP quota.
 - Use `smart-search setup --non-interactive --openai-compatible-stream true` only when an OpenAI-compatible relay benefits from SSE streaming for long requests. Default remains false.
 - Use `smart-search setup --non-interactive --anysearch-api-url "https://api.anysearch.com/mcp" --anysearch-key "key"` only for experimental AnySearch acceptance; do not add it to the normal minimum-profile setup.
@@ -73,6 +75,11 @@
 - `TAVILY_TIMEOUT_SECONDS` controls the Tavily `doctor` connectivity timeout and defaults to `30`. Raise it for slower pooled/community Tavily endpoints before judging the provider unhealthy.
 - `ANYSEARCH_API_URL` defaults to `https://api.anysearch.com/mcp`; `ANYSEARCH_TIMEOUT_SECONDS` defaults to `30`.
 - `FIRECRAWL_API_URL` defaults to `https://api.firecrawl.dev/v2`. Use it only for a Firecrawl-compatible REST base.
+- `CAMOFOX_BROWSER_FETCH_ENABLED` defaults to `true`.
+- `CAMOFOX_MCP_URL` defaults to `http://127.0.0.1:19388/mcp`.
+- `CAMOFOX_HEALTH_URL` defaults from `CAMOFOX_MCP_URL`.
+- `CAMOFOX_AUTH_TOKEN`, `CAMOFOX_TOKEN_COMMAND`, and `CAMOFOX_TUNNEL_SCRIPT` configure the browser bridge token path.
+- `CAMOFOX_FETCH_TIMEOUT_SECONDS` defaults to `75`.
 
 ## Intent Router Setup
 

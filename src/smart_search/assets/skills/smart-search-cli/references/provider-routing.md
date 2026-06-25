@@ -50,17 +50,18 @@ Intent router rules:
 - xAI Responses mode may use only `XAI_TOOLS=web_search,x_search` and a subset of those tools.
 - Chat Completions mode must not send xAI `web_search` / `x_search` tools or legacy `search_parameters`; xAI Chat Completions Live Search is deprecated.
 - The standard minimum profile requires one configured provider in each of `main_search`, `docs_search`, and fetch capability. Missing required capabilities should be treated as a hard configuration failure.
-- AnySearch is reported only as optional experimental `vertical_search`; it is not part of the `web_search` fallback and is not required by the `standard` minimum profile.
+- AnySearch is reported only as optional experimental `vertical_search`; it is not part of general web discovery and is not required by the `standard` minimum profile.
 - Jina Reader is `web_fetch` only, not a general search provider. `JINA_API_KEY` is required before Jina satisfies the standard minimum profile; anonymous `r.jina.ai` is explicit/experimental fetch behavior.
+- Camofox Browser is `web_fetch` only and is the browser evidence layer for known, selected, dynamic, or blocked URLs. It is not a drop-in replacement for `main_search`, Exa, Context7, Zhipu, or Tavily search indexes.
 - Same-capability fallback is allowed; cross-capability fallback is not. Context7 is not used for unrelated broad web queries, and page extraction providers are not used as docs search providers.
 - `main_search`: xAI Responses first for Grok/xAI, then OpenAI-compatible answer fallback when that peer provider is separately configured and `--fallback auto` is active.
 - `web_search`: Zhipu Web Search API first when routed in, then Zhipu Coding Plan MCP `web_search_prime`, then Tavily / Firecrawl source search when configured.
-- `docs_search`: Context7 first for library/API/docs intent, then Exa for official-domain, paper, product-page, trusted-site, or low-noise supplemental discovery.
-- Fetch capability: Tavily first, then Jina Reader with `JINA_API_KEY`, then Zhipu Coding Plan MCP `webReader`, then Firecrawl.
+- `docs_search`: Context7 first for library/API/docs intent, then Exa for explicit docs/API/papers/standards, known-domain/site:, or requested low-noise supplemental discovery.
+- Fetch capability: Tavily first, then Jina Reader with `JINA_API_KEY`, then Zhipu Coding Plan MCP `webReader`, then Firecrawl, then Camofox Browser.
 - `search` calls Tavily and/or Firecrawl only when `--extra-sources N` is greater than 0.
 - With both Tavily and Firecrawl configured, `search --extra-sources N` splits extra sources between them, with Tavily receiving about 60% and Firecrawl the rest.
 - `fetch` and known-URL `search "https://..."` use the same fetch fallback chain.
-- `fetch` tries Tavily first, then Jina with `JINA_API_KEY`, then Zhipu Coding Plan MCP Reader, then Firecrawl.
+- `fetch` tries Tavily first, then Jina with `JINA_API_KEY`, then Zhipu Coding Plan MCP Reader, then Firecrawl, then Camofox Browser.
 - `map` currently uses Tavily only.
 - `exa-search` and `exa-similar` use Exa only.
 - `context7-library` and `context7-docs` use Context7 only.
@@ -96,6 +97,17 @@ Jina Reader:
 - `JINA_RESPOND_WITH=readerlm-v2` requires `JINA_API_KEY` and should report a configuration error without a network request when the key is missing.
 - Jina Reader is `web_fetch` only, not `web_search`.
 - Jina 401/403, 422, 429, timeout, network errors, and low-quality challenge pages such as `Title: Just a moment...` must be reported as failed provider attempts and allow same-capability fallback.
+
+Camofox Browser:
+
+- `CAMOFOX_BROWSER_FETCH_ENABLED` defaults to `true`.
+- `CAMOFOX_MCP_URL` defaults to `http://127.0.0.1:19388/mcp`.
+- `CAMOFOX_HEALTH_URL` defaults to the MCP URL with `/mcp` replaced by `/health`.
+- `CAMOFOX_AUTH_TOKEN`, `CAMOFOX_TOKEN_COMMAND`, or `CAMOFOX_TUNNEL_SCRIPT` explicitly configures the browser bridge.
+- `CAMOFOX_SSH_HOST` is an optional remote token-resolution host.
+- `CAMOFOX_FETCH_TIMEOUT_SECONDS` defaults to `75`.
+- Camofox can satisfy `SMART_SEARCH_MINIMUM_PROFILE=standard` only when its bridge is explicitly configured and healthy enough to provide browser-visible page evidence.
+- Use source discovery -> Camofox verification -> optional Stagehand extraction for discovery-oriented quota fallbacks.
 
 AnySearch:
 
@@ -136,6 +148,7 @@ Exa domain filters:
 - Use `exa-similar` when a known good page is available and adjacent sources are needed.
 - Use `search --format content` when a human wants only the generated answer body.
 - Use `fetch --format markdown` or `fetch --format content` for user-supplied URLs or when exact page text matters.
+- For supplier/directory/procurement expansion, default to main-search candidate discovery and then use `fetch` or Camofox for page evidence. Do not add Exa just to de-noise official/contact/portfolio URLs after successful main search.
 - Use `map` before fetching many pages from a documentation site.
 - Keep `search --extra-sources` small (`1` to `3`) unless broad coverage is requested.
 - For current news or high-risk claims, prefer source discovery plus `fetch`; do not treat broad `search.content` plus `extra_sources` as claim-level verification.
@@ -145,6 +158,6 @@ Exa domain filters:
 - Provider architecture changes must be verified as distributable CLI behavior, not as behavior that only works because one developer machine has a specific wrapper, shell profile, or local config file.
 - Register providers by capability first, then route by intent. Fallback is allowed only within the same capability.
 - Keep xAI Responses and OpenAI-compatible as peer `main_search` providers. A failed xAI Responses request may fall back to OpenAI-compatible only when `OPENAI_COMPATIBLE_API_URL` and `OPENAI_COMPATIBLE_API_KEY` are separately configured.
-- Do not use Context7 for broad news or generic web facts; do not use Tavily or Firecrawl as documentation semantic-search replacements.
+- Do not use Context7 for broad news or generic web facts; do not use Tavily, Firecrawl, or Camofox Browser as documentation semantic-search replacements.
 - Standard installs must fail closed unless `main_search`, `docs_search`, and fetch capability each have at least one configured provider.
 - After provider-routing changes, run source-checkout regression plus `smart-search smoke --mock --format json`. If live keys were used, run a targeted secret scan for exact key substrings before committing.

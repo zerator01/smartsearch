@@ -1,5 +1,6 @@
 from .base import BaseSearchProvider, SearchResult
 from .anysearch import AnySearchProvider
+from .camofox import CamofoxBrowserProvider
 from .context7 import Context7Provider
 from .openai_compatible import OpenAICompatibleSearchProvider
 from .xai_responses import XAIResponsesSearchProvider
@@ -12,6 +13,7 @@ __all__ = [
     "BaseSearchProvider",
     "SearchResult",
     "AnySearchProvider",
+    "CamofoxBrowserProvider",
     "Context7Provider",
     "OpenAICompatibleSearchProvider",
     "XAIResponsesSearchProvider",

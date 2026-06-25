@@ -27,12 +27,12 @@ The current architecture has two layers:
 
 | Layer | Responsibility |
 | --- | --- |
-| CLI executor | Runs deterministic commands, provider routing, fallback, JSON/Markdown output, local config, smoke/regression checks |
+| CLI executor | Runs deterministic commands, scenario routing, provider attempts, JSON/Markdown output, local config, smoke/regression checks |
 | Skill / AI orchestration | Infers user intent, chooses normal search vs Deep Research, executes planned CLI steps, writes final source-backed answers |
 
 Default `smart-search search` stays fast and live. `smart-search deep` is the explicit offline Deep Research planner. It does not call providers, run `doctor`, or fetch pages by default; it emits a `research_plan` that an AI agent or user can execute step by step. `smart-search research` is the live Deep Research executor: it uses the same planner shape, then runs discovery, fetch/read, gap check, and evidence-only synthesis.
 
-Intent routing now has its own layer. Instead of letting a model pick providers directly, Smart Search first decides which capabilities are needed, then the existing capability-first provider registry chooses same-capability fallback:
+Intent routing now has its own layer. Instead of letting a model pick providers directly, Smart Search first decides the scenario and capabilities needed, then executes the smallest useful workflow:
 
 ```text
 user query
@@ -40,7 +40,7 @@ user query
  -> semantic route: optional embeddings over capability examples
  -> classifier route: optional structured model classification
  -> merged required_capabilities
- -> provider fallback inside docs_search / web_search / web_fetch / vertical_search
+ -> scenario workflow: discover sources, fetch evidence, optionally extract structure
 ```
 
 `smart-search route "query"` explains this decision without calling search, docs, fetch, or provider APIs. `smart-search deep` keeps the offline planner contract and uses local/rules signals only.
@@ -144,24 +144,25 @@ provider keys or create Trellis/hooks/agents/commands.
 | `main_search` | `search` | xAI Responses, OpenAI-compatible Chat Completions | Broad answer generation and synthesis |
 | `docs_search` | `context7-library`, `context7-docs`, `exa-search` | Context7, Exa | Official docs, SDKs, APIs, framework/library evidence |
 | `web_search` | `zhipu-search`, `zhipu-mcp-search`, intent-routed reinforcement inside `search` | Zhipu Web Search API, Zhipu Coding Plan MCP, Tavily, Firecrawl | Chinese, domestic, current, domain-filtered, or supplementary web discovery |
-| `web_fetch` | `fetch`, `zhipu-mcp-reader` | Tavily, Jina Reader, Zhipu Coding Plan MCP Reader, Firecrawl | Exact URL content extraction for evidence |
+| `web_fetch` | `fetch`, `zhipu-mcp-reader` | Tavily, Jina Reader, Zhipu Coding Plan MCP Reader, Firecrawl, Camofox Browser | Exact URL content extraction for evidence |
 | `vertical_search` | `anysearch-domains`, `anysearch-search`, `anysearch-extract`, `anysearch-batch` | AnySearch (experimental) | Acceptance testing for structured vertical domains such as CVE, finance, legal, academic, and code/docs |
 | `site_map` | `map` | Tavily | Site/documentation structure discovery |
 | `deep_planner` | `deep` / `dr` | Local planner only | Offline plan generation; no provider call by default |
 | `research_executor` | `research` / `rs` | Registered providers by capability | Live staged research: plan, discover, fetch/read, gap check, evidence-only synthesis |
 
-Fallback is same-capability only:
+Fallback is scenario-first:
 
-| Capability | Fallback chain |
+| Scenario | Workflow |
 | --- | --- |
-| `main_search` | xAI Responses -> OpenAI-compatible |
-| `docs_search` | Context7 for library/API/docs intent; Exa for official domains, papers, product pages, and trusted-site discovery |
-| `web_search` | Zhipu Web Search API -> Zhipu Coding Plan MCP `web_search_prime` -> Tavily -> Firecrawl |
-| `web_fetch` | Tavily -> Jina Reader with `JINA_API_KEY` -> Zhipu Coding Plan MCP `webReader` -> Firecrawl |
+| Source discovery | main_search discovers candidate URLs -> scenario APIs reinforce when useful -> Camofox verifies selected pages when quotas or fetch APIs fail |
+| Known URL evidence | fetch/extract API reads the selected URL -> Camofox opens the page when API fetch fails, is out of quota, or misses rendered content -> Stagehand extracts structure when needed |
+| Dynamic or blocked page | Camofox opens the browser-visible page -> Stagehand extracts task-specific fields when needed |
 
-AnySearch is intentionally not part of the `web_search` fallback chain and is not required by the `standard` minimum profile. Use its explicit commands for acceptance and boundary testing before promoting any vertical domain into a future route.
+Provider attempt order is an internal implementation detail and is shown only in debug output. AnySearch is intentionally not part of general web discovery and is not required by the `standard` minimum profile. Use its explicit commands for acceptance and boundary testing before promoting any vertical domain into a future route.
 
 Jina Reader is a `web_fetch` provider only. `JINA_API_KEY` is required before Jina satisfies `SMART_SEARCH_MINIMUM_PROFILE=standard`; anonymous `r.jina.ai` behavior is treated as explicit/experimental fetch behavior and must not weaken fail-closed setup checks.
+
+Camofox Browser is the browser evidence layer for known, selected, dynamic, or blocked URLs. It is not a `web_search`, `docs_search`, or main synthesis provider; when search or docs quotas are exhausted, use the composite workflow: main_search discovers candidate URLs, Camofox fetches/verifies page-visible content, and Stagehand performs structured extraction when needed.
 
 The CLI exposes observability fields such as `routing_decision`, `provider_attempts`, `providers_used`, `fallback_used`, `primary_sources`, `extra_sources`, and `source_warning`.
 
@@ -169,7 +170,7 @@ The CLI exposes observability fields such as `routing_decision`, `provider_attem
 
 `extra_sources` are discovery candidates. For high-risk claims, news, policy, finance, health, selection decisions, and serious reviews, fetch key pages first and cite fetched text rather than treating a broad search answer as proof.
 
-Routing rule of thumb: start with `search` for broad discovery and synthesis; use `research` when you want the CLI to execute the deeper evidence workflow; use Zhipu Web Search API for Chinese, domestic, policy, announcements, and current-news searches; use Zhipu Coding Plan MCP only when you explicitly want the Coding Plan quota route; use Context7 first for library/API/framework docs; use Exa for official domains, papers, product pages, trusted sites, and low-noise discovery; use Tavily/Firecrawl through `search --extra-sources` for horizontal candidates and through `fetch` for page evidence; use Jina for known-URL extraction; use AnySearch only when you explicitly need experimental vertical-domain search.
+Routing rule of thumb: start with `search` for broad discovery and synthesis; use `research` when you want the CLI to execute the deeper evidence workflow; use Zhipu Web Search API for Chinese, domestic, policy, announcements, and current-news searches; use Zhipu Coding Plan MCP only when you explicitly want the Coding Plan quota route; use Context7 first for library/API/framework docs; use Exa only for explicit docs/API/papers/standards, known-domain/site: searches, user-requested low-noise discovery, or when main search fails to produce enough candidate URLs; use Tavily/Firecrawl through `search --extra-sources` for horizontal candidates and through `fetch` for page evidence; use Jina for known-URL extraction; use AnySearch only when you explicitly need experimental vertical-domain search.
 
 ## Deep Research
 
@@ -214,13 +215,13 @@ smart-search research "OpenAI Responses API web_search vs Chat Completions searc
 smart-search rs "https://example.com/source" --fallback off --format markdown
 ```
 
-`research` runs plan -> discover -> fetch/read -> gap check -> evidence-only synthesis. It defaults to `--fallback auto`, which permits same-capability fallback even when a normal `search` configuration is conservative. `--fallback off` tries only the first provider selected inside each capability, which is useful for debugging provider behavior.
+`research` runs plan -> discover -> fetch/read -> gap check -> evidence-only synthesis. It defaults to `--fallback auto`, which permits scenario-internal provider retries even when a normal `search` configuration is conservative. `--fallback off` tries only the first provider selected inside each capability, which is useful for debugging provider behavior.
 
 Research JSON includes `final_answer`, `citations`, `evidence_items`, `gap_check`, `provider_attempts`, `fallback_used`, `degraded`, `route_policy_version`, and `evidence_dir`. Discovery snippets are candidates only; citations are produced only from fetched/read evidence. If fallback cannot close a gap, `research` finishes degraded and lists unsupported gaps instead of inventing evidence.
 
 The research router is capability-first plus provider-advantage:
 
-- Context7 first for library/API/framework docs, with Exa as official-domain, paper, product, or trusted low-noise discovery.
+- Context7 first for library/API/framework docs, with Exa reserved for explicit docs/API/papers/standards, known-domain/site: searches, user-requested low-noise discovery, or insufficient main-search discovery.
 - Zhipu Web Search API first for Chinese, domestic, current, policy, and announcement searches.
 - Zhipu Coding Plan MCP remains a separate quota route through `web_search_prime` and `webReader`.
 - Jina is favored for known public URLs, PDFs, and arXiv extraction; ReaderLM-v2 still requires `JINA_API_KEY`.
@@ -247,13 +248,14 @@ The default interactive setup wizard includes optional smart intent router promp
 | --- | --- | --- | --- | --- |
 | xAI Responses API | Primary live search with `web_search,x_search` tools | `XAI_API_KEY`, `XAI_API_URL`, `XAI_MODEL`, `XAI_TOOLS` | [docs.x.ai](https://docs.x.ai/docs) | [xAI API keys](https://console.x.ai/team/default/api-keys) |
 | OpenAI-compatible Chat Completions | Primary search through OpenAI or a compatible relay; no xAI search tools are sent here | `OPENAI_COMPATIBLE_API_URL`, `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_MODEL`, `OPENAI_COMPATIBLE_STREAM` | [OpenAI platform docs](https://platform.openai.com/docs) | [OpenAI API keys](https://platform.openai.com/api-keys) or your relay provider |
-| Exa | Low-noise official docs, API, paper, product, trusted-page discovery | `EXA_API_KEY` | [Exa docs](https://docs.exa.ai/) | [Exa API keys](https://dashboard.exa.ai/api-keys) |
+| Exa | Paid precision discovery for explicit docs/API/papers/standards, known-domain/site: searches, or requested low-noise source discovery | `EXA_API_KEY` | [Exa docs](https://docs.exa.ai/) | [Exa API keys](https://dashboard.exa.ai/api-keys) |
 | Context7 | SDK, library, framework, and API documentation fallback | `CONTEXT7_API_KEY`, `CONTEXT7_BASE_URL` | [Context7 docs](https://context7.com/docs) | [Context7](https://context7.com/) |
 | Zhipu Web Search API | Chinese, domestic, current, or domain-filtered web discovery | `ZHIPU_API_KEY`, `ZHIPU_API_URL`, `ZHIPU_SEARCH_ENGINE` | [Zhipu web search docs](https://docs.bigmodel.cn/cn/guide/tools/web-search) | [Zhipu API keys](https://open.bigmodel.cn/usercenter/apikeys) |
 | Zhipu Coding Plan Remote MCP | Coding Plan quota web search, page reading, and open-source repo discovery | `ZHIPU_MCP_API_KEY`, `ZHIPU_MCP_SEARCH_API_URL`, `ZHIPU_MCP_READER_API_URL`, `ZHIPU_MCP_ZREAD_API_URL` | [search MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server), [reader MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/reader-mcp-server), [zread MCP](https://docs.bigmodel.cn/cn/coding-plan/mcp/zread-mcp-server) | [Zhipu API keys](https://open.bigmodel.cn/usercenter/apikeys) |
 | Tavily | Extra web sources, URL fetch, and site map | `TAVILY_API_URL`, `TAVILY_API_KEY` | [Tavily docs](https://docs.tavily.com/) | [Tavily app](https://app.tavily.com/home) |
 | Jina Reader | Known URL page extraction for `web_fetch`; key required for standard minimum profile | `JINA_API_KEY`, `JINA_READER_API_URL`, `JINA_RESPOND_WITH`, `JINA_TIMEOUT_SECONDS` | [Jina Reader](https://jina.ai/reader/) | [Jina AI](https://jina.ai/) |
 | Firecrawl | Fetch fallback and supplementary web sources | `FIRECRAWL_API_URL`, `FIRECRAWL_API_KEY` | [Firecrawl docs](https://docs.firecrawl.dev/) | [Firecrawl API keys](https://www.firecrawl.dev/app/api-keys) |
+| Camofox Browser | Local/remote browser-backed final fetch fallback for known URLs | `CAMOFOX_MCP_URL`, `CAMOFOX_HEALTH_URL`, `CAMOFOX_AUTH_TOKEN`, `CAMOFOX_TOKEN_COMMAND`, `CAMOFOX_TUNNEL_SCRIPT` | [Camoufox](https://github.com/daijro/camoufox), [Camofox Browser](https://github.com/redf0x1/camofox-browser) | Local bridge / self-hosted browser |
 | AnySearch | Experimental vertical search acceptance surface; not a default fallback | `ANYSEARCH_API_URL`, `ANYSEARCH_API_KEY`, `ANYSEARCH_TIMEOUT_SECONDS` | [AnySearch docs](https://www.anysearch.com/docs) | [AnySearch API keys](https://www.anysearch.com/console/api-keys) |
 
 Intent router configuration:
@@ -291,7 +293,7 @@ Important boundaries:
 - Do not force xAI `web_search` / `x_search` tools or legacy `search_parameters` into the OpenAI-compatible Chat Completions route.
 - `zhipu-search` support is the Web Search API route, not Zhipu Chat Completions `tools=[web_search]`, not Search Agent, and not the MCP Server.
 - Zhipu Coding Plan support is a separate Remote MCP route. `web_search_prime` maps to `web_search`, `webReader` maps to `web_fetch`, and zread tools map to explicit repo/docs discovery commands. It is not mixed into the existing `/paas/v4/web_search` Zhipu REST provider.
-- Zhipu Coding Plan MCP requires its own Coding Plan entitlement. A normal `ZHIPU_API_KEY` for Web Search API does not prove `zhipu-mcp-search` or zread access. If `ZHIPU_MCP_API_KEY` is absent or unauthorized, Smart Search skips those MCP providers; the `standard` minimum profile and same-capability fallback still work through the configured REST/search/fetch providers.
+- Zhipu Coding Plan MCP requires its own Coding Plan entitlement. A normal `ZHIPU_API_KEY` for Web Search API does not prove `zhipu-mcp-search` or zread access. If `ZHIPU_MCP_API_KEY` is absent or unauthorized, Smart Search skips those MCP providers; the `standard` minimum profile and scenario-internal retries still work through the configured REST/search/fetch providers.
 - Jina Reader is not a general search provider. `JINA_API_KEY` is required for Jina to count toward `standard`; `JINA_RESPOND_WITH=readerlm-v2` also requires `JINA_API_KEY`.
 - `ZHIPU_SEARCH_ENGINE` defaults to `search_std`. Supported official values include `search_std`, `search_pro`, `search_pro_sogou`, and `search_pro_quark`; custom values remain allowed for future services.
 - `TAVILY_API_URL` affects Tavily only. It does not proxy Zhipu. For Tavily Hikari / pooled endpoints, use `https://<host>/api/tavily`; setup normalizes root-host or `/mcp` inputs to that REST base.
@@ -335,7 +337,7 @@ Minimum profile defaults to `standard`, requiring at least:
 
 - one `main_search` provider: xAI Responses or OpenAI-compatible;
 - one `docs_search` provider: Exa or Context7;
-- one `web_fetch` provider: Tavily, Jina with `JINA_API_KEY`, Zhipu Coding Plan MCP Reader, or Firecrawl.
+- one `web_fetch` provider: Tavily, Jina with `JINA_API_KEY`, Zhipu Coding Plan MCP Reader, Firecrawl, or a configured Camofox Browser bridge.
 
 Missing required capabilities fail closed with a configuration error. Use `SMART_SEARCH_MINIMUM_PROFILE=off` only for local experiments.
 
@@ -463,7 +465,7 @@ smart-search fetch "https://example.com/source" --format markdown --output C:\tm
 
 For claim-level evidence:
 
-1. Discover candidate URLs with `search`, `exa-search`, `zhipu-search`, or `exa-similar`.
+1. Discover candidate URLs with `search` first; add `zhipu-search` for Chinese/current/domestic tasks, and use `exa-search` / `exa-similar` only for explicit docs/papers/known-domain/adjacent-source needs or insufficient main-search discovery.
 2. Fetch exact URLs with `fetch`.
 3. Cite fetched text in the final answer.
 4. Unsupported key claims must be fetched or downgraded to unverified candidates.
@@ -491,7 +493,7 @@ If search is slow:
 
 - reduce `--extra-sources`;
 - split broad questions into smaller queries;
-- use `exa-search` or `zhipu-search` for source discovery, then `fetch` key pages.
+- use `zhipu-search` for Chinese/current/domestic source discovery, or `exa-search` only for explicit docs/papers/known-domain/low-noise needs, then `fetch` key pages.
 
 If installed CLI health is uncertain:
 
@@ -529,7 +531,7 @@ This stable patch release moves the tested `0.1.13-beta.4` CLI and bundled skill
 - `smart-search skills status` reports whether installed user-level skills are missing, stale, up to date, or contain extra files without writing anything.
 - `smart-search skills update` refreshes only the managed bundled `smart-search-cli` files for selected AI-tool targets after a CLI upgrade.
 - `smart-search diagnose openai-compatible --format markdown` produces a focused, copy-pasteable troubleshooting report for OpenAI-compatible search hangs/timeouts.
-- Docs/API routing now prefers Context7 for library/framework documentation and keeps Exa for official domains, papers, product pages, and trusted-site discovery.
+- Docs/API routing now prefers Context7 for library/framework documentation and keeps Exa for explicit docs/API/papers/standards, known-domain/site: searches, or user-requested low-noise discovery.
 - README, bundled skill assets, release notes, and tests now document and verify the exact stable package behavior.
 
 ## Release lanes
